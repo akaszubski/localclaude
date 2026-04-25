@@ -287,20 +287,81 @@ do_doctor() {
 # let conversations grow past the model's actual context and fail mid-turn).
 profile_resolve() {
     case "$1" in
-        coder)       echo "mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit|qwen3_coder||262144" ;;
-        coder-next)  echo "lmstudio-community/Qwen3-Coder-Next-MLX-8bit|qwen3_coder||262144" ;;
+        coder)       echo "mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit|qwen3_coder||262144|" ;;
+        coder-next)  echo "lmstudio-community/Qwen3-Coder-Next-MLX-8bit|qwen3_coder||262144|" ;;
         # ~250GB on disk — only fits on big-RAM Macs (M3 Ultra 512GB etc).
-        # Top-of-class open-source SWE-bench Pro. A35B active = decent speed.
-        coder-480)   echo "mlx-community/Qwen3-Coder-480B-A35B-Instruct-4bit|qwen3_coder||262144" ;;
+        # 'remote_host' here means: if this profile is started on a machine
+        # that doesn't have the weights cached, SSH to the listed host and
+        # run the server there + tunnel its port locally.
+        coder-480)   echo "mlx-community/Qwen3-Coder-480B-A35B-Instruct-4bit|qwen3_coder||262144|andrewkaszubski@10.55.0.2" ;;
         # 'opus' (Qwen3.5-27B-Claude-4.6-Opus-Distilled-MLX-4bit) removed:
         # the upload includes vision_tower weights, so vllm-mlx's text engine
         # crashes on the unknown keys. Re-enable if/when a text-only variant
         # ships, or once we route this through --mllm.
-        instruct)    echo "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit|qwen|qwen3|262144" ;;
-        qwen36)      echo "mlx-community/Qwen3.6-35B-A3B-4bit|qwen|qwen3|262144" ;;
-        gemma4)      echo "mlx-community/gemma-4-31b-it-4bit|gemma4||131072" ;;
+        instruct)    echo "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit|qwen|qwen3|262144|" ;;
+        qwen36)      echo "mlx-community/Qwen3.6-35B-A3B-4bit|qwen|qwen3|262144|" ;;
+        gemma4)      echo "mlx-community/gemma-4-31b-it-4bit|gemma4||131072|" ;;
         *) return 1 ;;
     esac
+}
+
+# ── Remote helpers ────────────────────────────────────────────────
+# A profile may name a remote SSH host that has the weights. If the local
+# machine doesn't have the weights cached, we transparently SSH to that
+# host, run the server there bound to loopback, and forward port 8000 from
+# the local machine to the remote's loopback. From claude's perspective
+# nothing changes — it still talks to localhost:8000.
+
+_is_model_cached() {
+    # True if model weights exist somewhere we'd expect them on this machine.
+    local model="$1"
+    local cache_id
+    cache_id="models--$(echo "$model" | sed 's|/|--|')"
+    for base in "$HOME/Models" "$HOME/.cache/huggingface/hub"; do
+        if find "$base/$cache_id/snapshots" -maxdepth 2 -name "*.safetensors" -print -quit 2>/dev/null | grep -q .; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+_tunnel_pid_on_port() {
+    # Returns the SSH tunnel client PID on the given port, or empty.
+    lsof -nP -iTCP:"$1" -sTCP:LISTEN 2>/dev/null | awk '$1 == "ssh" && NR > 1 {print $2; exit}'
+}
+
+_open_tunnel() {
+    # Open a single-shot, no-PTY local-forward tunnel to <host>.
+    # Idempotent: if a tunnel is already up on $PORT, reuse it.
+    local host="$1"
+    if [[ -n "$(_tunnel_pid_on_port "$PORT")" ]]; then
+        echo "  (reusing existing SSH tunnel on $PORT)"
+        return 0
+    fi
+    if ssh -fN -o ExitOnForwardFailure=yes -o BatchMode=yes \
+            -L "$PORT:localhost:$PORT" "$host" 2>&1; then
+        echo "  ✓ SSH tunnel opened: localhost:$PORT → $host:$PORT"
+        return 0
+    fi
+    echo "  ✗ Failed to open SSH tunnel to $host" >&2
+    return 1
+}
+
+_close_tunnel() {
+    local pid
+    pid=$(_tunnel_pid_on_port "$PORT")
+    if [[ -n "$pid" ]]; then
+        echo "  Closing SSH tunnel (PID $pid)…"
+        kill "$pid" 2>/dev/null || true
+    fi
+}
+
+# Run a command on the remote host. Sets LOCALCLAUDE_NO_REMOTE=1 so any
+# `localclaude` invocation there knows it's already on the destination
+# machine and won't try to bounce again.
+_remote_exec() {
+    local host="$1"; shift
+    ssh -o BatchMode=yes "$host" "LOCALCLAUDE_NO_REMOTE=1 $*"
 }
 
 # ── Help ──────────────────────────────────────────────────────────
@@ -353,8 +414,23 @@ vllm-mlx on port $PORT first, so you'll never accidentally have two running.
 USAGE
 }
 
-# ── Stop (also clears the active marker) ──────────────────────────
+# ── Stop (also clears the active marker, and remote/tunnel if set) ────
 do_stop() {
+    # If the active marker says this is a remote profile, stop the remote
+    # server and close the local tunnel BEFORE touching the port.
+    local remote_host=""
+    if [[ -f "$ACTIVE" ]]; then
+        # shellcheck disable=SC1090
+        . "$ACTIVE" 2>/dev/null || true
+    fi
+    if [[ -n "${remote_host:-}" ]]; then
+        echo "Active profile is remote ($remote_host) — stopping there first…"
+        _remote_exec "$remote_host" "localclaude stop" 2>&1 | sed 's/^/  /' || true
+        _close_tunnel
+        rm -f "$ACTIVE"
+        return 0
+    fi
+
     local pid
     pid=$(lsof -nP -iTCP:$PORT -sTCP:LISTEN 2>/dev/null | awk 'NR==2 {print $2}' || true)
     if [[ -z "${pid:-}" ]]; then
@@ -497,8 +573,56 @@ do_start() {
         echo "Run 'localclaude -h' for profiles, or 'localclaude list' for cached models." >&2
         return 1
     }
-    local model tool_parser reasoning_parser context_window
-    IFS='|' read -r model tool_parser reasoning_parser context_window <<<"$resolved"
+    local model tool_parser reasoning_parser context_window remote_host
+    IFS='|' read -r model tool_parser reasoning_parser context_window remote_host <<<"$resolved"
+
+    # ── Remote dispatch ───────────────────────────────────────────
+    # If this profile names a remote host AND the model isn't cached on this
+    # machine AND we aren't already running on the remote (env var prevents
+    # recursion), bounce to the remote and tunnel back.
+    if [[ -n "$remote_host" ]] && [[ -z "${LOCALCLAUDE_NO_REMOTE:-}" ]] && ! _is_model_cached "$model"; then
+        echo "Profile $profile resolves to remote host: $remote_host"
+        echo "Model is not cached locally — running on remote + tunneling port $PORT…"
+        echo
+
+        # Stop anything on the local port first (might be a stale tunnel).
+        if lsof -nP -iTCP:$PORT -sTCP:LISTEN >/dev/null 2>&1; then
+            echo "Local port $PORT in use — clearing first…"
+            do_stop
+            echo
+        fi
+
+        # Build the same args list (less the local-only PYTHONPATH bit) and
+        # invoke localclaude on the remote. Pass through the chosen allowlist.
+        local remote_cmd="localclaude start $profile -allowlist $allowlist_preset"
+        echo "── Remote: $remote_host ──"
+        if ! _remote_exec "$remote_host" "$remote_cmd" 2>&1 | sed 's/^/  /'; then
+            echo "✗ Remote start failed."
+            return 1
+        fi
+
+        # Open the tunnel so claude on this machine can talk to the remote server.
+        echo
+        echo "── Tunnel ──"
+        _open_tunnel "$remote_host" || return 1
+
+        # Save active marker locally so `stop`/`status` know it's a remote.
+        cat > "$ACTIVE" <<META
+profile=$profile
+model=$model
+port=$PORT
+log=remote://$remote_host
+allowlist=$allowlist_preset
+context_window=$context_window
+remote_host=$remote_host
+started=$(date -Iseconds)
+META
+
+        echo
+        echo "✓ Remote server ready at http://localhost:$PORT (tunneled to $remote_host)"
+        print_connect "$model" "$context_window"
+        return 0
+    fi
 
     # Required dependency check — bail early with a clear error.
     if ! command -v vllm-mlx >/dev/null 2>&1; then
@@ -617,6 +741,7 @@ port=$PORT
 log=$log
 allowlist=$allowlist_preset
 context_window=$context_window
+remote_host=
 started=$(date -Iseconds)
 META
 
