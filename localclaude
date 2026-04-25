@@ -280,17 +280,22 @@ do_doctor() {
 }
 
 # ── Profile catalog ───────────────────────────────────────────────
+# Format: model | tool_call_parser | reasoning_parser | context_window
+# context_window is the model's native max_position_embeddings, used to set
+# CLAUDE_CODE_AUTO_COMPACT_WINDOW so auto-compaction triggers at ~80% of the
+# REAL limit (instead of Claude Code's default 200K assumption — which would
+# let conversations grow past the model's actual context and fail mid-turn).
 profile_resolve() {
     case "$1" in
-        coder)       echo "mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit|qwen3_coder|" ;;
-        coder-next)  echo "lmstudio-community/Qwen3-Coder-Next-MLX-8bit|qwen3_coder|" ;;
+        coder)       echo "mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit|qwen3_coder||262144" ;;
+        coder-next)  echo "lmstudio-community/Qwen3-Coder-Next-MLX-8bit|qwen3_coder||262144" ;;
         # 'opus' (Qwen3.5-27B-Claude-4.6-Opus-Distilled-MLX-4bit) removed:
         # the upload includes vision_tower weights, so vllm-mlx's text engine
         # crashes on the unknown keys. Re-enable if/when a text-only variant
         # ships, or once we route this through --mllm.
-        instruct)    echo "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit|qwen|qwen3" ;;
-        qwen36)      echo "mlx-community/Qwen3.6-35B-A3B-4bit|qwen|qwen3" ;;
-        gemma4)      echo "mlx-community/gemma-4-31b-it-4bit|gemma4|" ;;
+        instruct)    echo "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit|qwen|qwen3|262144" ;;
+        qwen36)      echo "mlx-community/Qwen3.6-35B-A3B-4bit|qwen|qwen3|262144" ;;
+        gemma4)      echo "mlx-community/gemma-4-31b-it-4bit|gemma4||131072" ;;
         *) return 1 ;;
     esac
 }
@@ -374,12 +379,17 @@ do_stop() {
 # ── Print the claude connect block ────────────────────────────────
 print_connect() {
     local model="$1"
+    local context_window="${2:-}"
+    local extra_env=""
+    if [[ -n "$context_window" ]]; then
+        extra_env=" CLAUDE_CODE_AUTO_COMPACT_WINDOW=$context_window"
+    fi
     cat <<CONNECT
 
 To connect Claude Code (run in another terminal):
 
     cd ~/Dev/vllm-mlx           # or any project directory you want claude to work in
-    ANTHROPIC_BASE_URL=http://localhost:$PORT ANTHROPIC_API_KEY=not-needed ANTHROPIC_MODEL=$model claude
+    ANTHROPIC_BASE_URL=http://localhost:$PORT ANTHROPIC_API_KEY=not-needed ANTHROPIC_MODEL=$model$extra_env claude
 
 When done, kill the server:
 
@@ -425,7 +435,7 @@ do_status() {
     echo
     echo "── Recent throughput ──"
     grep -E "Anthropic messages|first token after" "$log" 2>/dev/null | tail -4 || echo "(no requests yet)"
-    print_connect "$model"
+    print_connect "$model" "${context_window:-}"
 }
 
 # ── Start ─────────────────────────────────────────────────────────
@@ -482,8 +492,8 @@ do_start() {
         echo "Run 'localclaude -h' for profiles, or 'localclaude list' for cached models." >&2
         return 1
     }
-    local model tool_parser reasoning_parser
-    IFS='|' read -r model tool_parser reasoning_parser <<<"$resolved"
+    local model tool_parser reasoning_parser context_window
+    IFS='|' read -r model tool_parser reasoning_parser context_window <<<"$resolved"
 
     # Required dependency check — bail early with a clear error.
     if ! command -v vllm-mlx >/dev/null 2>&1; then
@@ -588,7 +598,8 @@ Starting profile: $profile
   model:            $model
   tool-parser:      $tool_parser
   reasoning-parser: ${reasoning_parser:-<none>}
-  allowlist:        $allowlist_preset${allowlist_tools:+ ($allowlist_tools)}
+  allowlist:        $allowlist_preset
+  context-window:   ${context_window:-<unset>} tokens (auto-compact at ~80%)
   log:              $log
 
 INTRO
@@ -600,6 +611,7 @@ model=$model
 port=$PORT
 log=$log
 allowlist=$allowlist_preset
+context_window=$context_window
 started=$(date -Iseconds)
 META
 
@@ -665,7 +677,7 @@ META
     fi
 
     echo "✓ Server ready at http://localhost:$PORT"
-    print_connect "$model"
+    print_connect "$model" "$context_window"
 }
 
 # ── List cached ───────────────────────────────────────────────────
