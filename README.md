@@ -49,10 +49,14 @@ localclaude -h                 Help.
 |---|---|---|
 | `coder` | `mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit` | MoE A3B coder, ~120 tok/s on M4 Max |
 | `coder-next` | `lmstudio-community/Qwen3-Coder-Next-MLX-8bit` | 8-bit, top SWE-bench Pass@5 |
-| `opus` | `mlx-community/Qwen3.5-27B-Claude-4.6-Opus-Distilled-MLX-4bit` | Claude-style dense 27B |
 | `instruct` | `mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit` | General MoE baseline |
 | `qwen36` | `mlx-community/Qwen3.6-35B-A3B-4bit` | Newest, beats Gemma 4 (download on demand) |
 | `gemma4` | `mlx-community/gemma-4-31b-it-4bit` | Google dense 31B |
+
+> The `opus` profile (Qwen3.5-27B-Claude-4.6-Opus-Distilled) was dropped — the
+> mlx-community upload bundles vision_tower weights and vllm-mlx's text engine
+> crashes on them. Pass arbitrary models via `localclaude start -model <hf-id>`
+> if you want to experiment.
 
 ### Daily flow
 

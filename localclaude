@@ -29,7 +29,10 @@ profile_resolve() {
     case "$1" in
         coder)       echo "mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit|qwen3_coder|" ;;
         coder-next)  echo "lmstudio-community/Qwen3-Coder-Next-MLX-8bit|qwen3_coder|" ;;
-        opus)        echo "mlx-community/Qwen3.5-27B-Claude-4.6-Opus-Distilled-MLX-4bit|qwen|qwen3" ;;
+        # 'opus' (Qwen3.5-27B-Claude-4.6-Opus-Distilled-MLX-4bit) removed:
+        # the upload includes vision_tower weights, so vllm-mlx's text engine
+        # crashes on the unknown keys. Re-enable if/when a text-only variant
+        # ships, or once we route this through --mllm.
         instruct)    echo "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit|qwen|qwen3" ;;
         qwen36)      echo "mlx-community/Qwen3.6-35B-A3B-4bit|qwen|qwen3" ;;
         gemma4)      echo "mlx-community/gemma-4-31b-it-4bit|gemma4|" ;;
@@ -52,7 +55,6 @@ Usage:
 Profiles:
   coder       Qwen3-Coder-30B-A3B-Instruct-4bit       MoE A3B coder, ~120 tok/s
   coder-next  Qwen3-Coder-Next-MLX-8bit                8-bit, best SWE-bench Pass@5
-  opus        Qwen3.5-27B-Claude-4.6-Opus-Distilled    Claude-style dense 27B
   instruct    Qwen3-30B-A3B-Instruct-2507-4bit         general MoE baseline
   qwen36      Qwen3.6-35B-A3B-4bit                     newest, beats Gemma 4 (download)
   gemma4      gemma-4-31b-it-4bit                      Google dense 31B (cached)
@@ -192,6 +194,14 @@ do_start() {
     )
     [[ -n "$reasoning_parser" ]] && args+=(--reasoning-parser "$reasoning_parser")
 
+    # Prefer the user's local vllm-mlx repo (with optimizer + thinking-gate
+    # patches) over any system-wide install. Picking up the local copy means
+    # our --optimize-prompts / --reasoning-parser flags actually exist.
+    local pythonpath_prefix=""
+    if [[ -d "$HOME/Dev/vllm-mlx/vllm_mlx" ]]; then
+        pythonpath_prefix="PYTHONPATH=$HOME/Dev/vllm-mlx"
+    fi
+
     local log="$LOG_DIR/$profile.log"
 
     cat <<INTRO
@@ -212,9 +222,14 @@ log=$log
 started=$(date -Iseconds)
 META
 
-    # Launch detached
-    cd "$HOME/Dev/vllm-mlx"
-    nohup vllm-mlx "${args[@]}" > "$log" 2>&1 &
+    # Launch detached. PYTHONPATH prefix (if any) ensures we use the user's
+    # local patched repo over any system vllm-mlx.
+    cd "$HOME/Dev/vllm-mlx" 2>/dev/null || cd "$HOME"
+    if [[ -n "$pythonpath_prefix" ]]; then
+        nohup env $pythonpath_prefix vllm-mlx "${args[@]}" > "$log" 2>&1 &
+    else
+        nohup vllm-mlx "${args[@]}" > "$log" 2>&1 &
+    fi
     local server_pid=$!
     disown $server_pid 2>/dev/null || true
     echo "server-pid=$server_pid"
