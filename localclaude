@@ -243,15 +243,17 @@ do_start() {
             allowlist_tools="Read,Edit,Bash,Grep,Glob,Write"
             ;;
         code)
-            # All 24 Claude Code native tools — the full agentic toolkit
-            # (file ops + Bash + Task subagents + TodoWrite + plan mode + etc.)
-            # without any MCP servers. ~99% reduction since all are stubbed.
-            allowlist_tools="Read,Edit,Write,Bash,Glob,Grep,Task,TodoWrite,ExitPlanMode,EnterPlanMode,NotebookEdit,WebFetch,WebSearch,BashOutput,KillShell,Skill,SlashCommand,TaskCreate,TaskUpdate,TaskGet,TaskList,TaskOutput,TaskStop,AskUserQuestion"
+            # All Claude Code 2.x native tools — full agentic toolkit
+            # (file ops + Bash + Task subagents + TodoWrite + plan mode +
+            # worktrees + cron + monitor + skill/slash + MCP discovery)
+            # without any MCP server tools. ~99% reduction for the 24 stubbed
+            # natives; the additional ~10 unstubbed natives pass through with
+            # original descriptions (~2k chars total — negligible).
+            allowlist_tools="Read,Edit,Write,Bash,Glob,Grep,Task,TodoWrite,ExitPlanMode,EnterPlanMode,NotebookEdit,WebFetch,WebSearch,BashOutput,KillShell,Skill,SlashCommand,TaskCreate,TaskUpdate,TaskGet,TaskList,TaskOutput,TaskStop,AskUserQuestion,Monitor,PushNotification,EnterWorktree,ExitWorktree,CronCreate,CronDelete,CronList,RemoteTrigger,ListMcpResourcesTool,ReadMcpResourceTool,ToolSearch"
             ;;
         web)
             # Alias for 'code' — kept for backwards compatibility.
-            # The 'code' preset already includes WebSearch + WebFetch.
-            allowlist_tools="Read,Edit,Write,Bash,Glob,Grep,Task,TodoWrite,ExitPlanMode,EnterPlanMode,NotebookEdit,WebFetch,WebSearch,BashOutput,KillShell,Skill,SlashCommand,TaskCreate,TaskUpdate,TaskGet,TaskList,TaskOutput,TaskStop,AskUserQuestion"
+            allowlist_tools="Read,Edit,Write,Bash,Glob,Grep,Task,TodoWrite,ExitPlanMode,EnterPlanMode,NotebookEdit,WebFetch,WebSearch,BashOutput,KillShell,Skill,SlashCommand,TaskCreate,TaskUpdate,TaskGet,TaskList,TaskOutput,TaskStop,AskUserQuestion,Monitor,PushNotification,EnterWorktree,ExitWorktree,CronCreate,CronDelete,CronList,RemoteTrigger,ListMcpResourcesTool,ReadMcpResourceTool,ToolSearch"
             ;;
         all|off|none)
             allowlist_tools=""   # don't add the flag — full 274+ tool catalog passes through
