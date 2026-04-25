@@ -289,6 +289,9 @@ profile_resolve() {
     case "$1" in
         coder)       echo "mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit|qwen3_coder||262144" ;;
         coder-next)  echo "lmstudio-community/Qwen3-Coder-Next-MLX-8bit|qwen3_coder||262144" ;;
+        # ~250GB on disk — only fits on big-RAM Macs (M3 Ultra 512GB etc).
+        # Top-of-class open-source SWE-bench Pro. A35B active = decent speed.
+        coder-480)   echo "mlx-community/Qwen3-Coder-480B-A35B-Instruct-4bit|qwen3_coder||262144" ;;
         # 'opus' (Qwen3.5-27B-Claude-4.6-Opus-Distilled-MLX-4bit) removed:
         # the upload includes vision_tower weights, so vllm-mlx's text engine
         # crashes on the unknown keys. Re-enable if/when a text-only variant
@@ -318,6 +321,8 @@ Usage:
 Profiles:
   coder       Qwen3-Coder-30B-A3B-Instruct-4bit       MoE A3B coder, ~120 tok/s
   coder-next  Qwen3-Coder-Next-MLX-8bit                8-bit, best SWE-bench Pass@5
+  coder-480   Qwen3-Coder-480B-A35B-Instruct-4bit      ~250GB; top SWE-bench Pro
+                                                        (M3 Ultra-class RAM only)
   instruct    Qwen3-30B-A3B-Instruct-2507-4bit         general MoE baseline
   qwen36      Qwen3.6-35B-A3B-4bit                     newest, beats Gemma 4 (download)
   gemma4      gemma-4-31b-it-4bit                      Google dense 31B (cached)
