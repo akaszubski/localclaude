@@ -44,10 +44,11 @@ profile_resolve() {
 help() {
     cat <<USAGE
 Usage:
-  localclaude start <profile>    Kill any existing server, start chosen profile,
+  localclaude start <profile> [-allowlist code|web|all]
+                                 Kill any existing server, start chosen profile,
                                  print the claude command to connect in another terminal.
   localclaude stop               Kill the running server.
-  localclaude restart            Restart the last-active profile.
+  localclaude restart            Restart the last-active profile (inherits allowlist).
   localclaude status             Show running model + the claude connect command.
   localclaude list               List cached MLX models on this Mac.
   localclaude -h                 This help.
@@ -58,6 +59,20 @@ Profiles:
   instruct    Qwen3-30B-A3B-Instruct-2507-4bit         general MoE baseline
   qwen36      Qwen3.6-35B-A3B-4bit                     newest, beats Gemma 4 (download)
   gemma4      gemma-4-31b-it-4bit                      Google dense 31B (cached)
+
+Allowlist presets (controls how aggressively the optimizer drops tools):
+  code   (default)  Read,Edit,Bash,Grep,Glob,Write          ~99% prefill reduction,
+                                                             no MCP/web tools.
+  web              code + WebSearch + WebFetch              Adds research tools.
+  all              <no filter — all 274+ tools pass through> Slowest first prefill
+                                                             (~50s for 80k tokens),
+                                                             but every MCP tool
+                                                             stays available.
+
+Examples:
+  localclaude start coder                       # default fast (-allowlist code)
+  localclaude start coder -allowlist all        # all MCP tools, slow first prefill
+  localclaude start qwen36 -allowlist web       # research-capable
 
 Only ONE server runs at a time. \`start\` always stops any existing
 vllm-mlx on port $PORT first, so you'll never accidentally have two running.
@@ -151,14 +166,45 @@ do_status() {
 
 # ── Start ─────────────────────────────────────────────────────────
 do_start() {
-    local profile="${1:-}"
+    local profile=""
+    local allowlist_preset="code"   # default: tight allowlist for fast prefill
+
+    # Parse args: profile name + optional flags. Order doesn't matter.
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -allowlist|--allowlist)
+                allowlist_preset="${2:-}"
+                shift 2
+                ;;
+            -all|--all)
+                allowlist_preset="all"
+                shift
+                ;;
+            -*)
+                echo "Unknown flag: $1" >&2
+                echo "Available flags: -allowlist <code|web|all>  -all" >&2
+                return 1
+                ;;
+            *)
+                if [[ -z "$profile" ]]; then
+                    profile="$1"
+                else
+                    echo "Unexpected extra arg: $1" >&2
+                    return 1
+                fi
+                shift
+                ;;
+        esac
+    done
 
     # No profile? Try restart of last-active.
     if [[ -z "$profile" ]]; then
         if [[ -f "$ACTIVE" ]]; then
             # shellcheck disable=SC1090
             source "$ACTIVE"
-            echo "No profile given — restarting last: $profile"
+            echo "No profile given — restarting last: $profile (allowlist=${allowlist:-code})"
+            # Inherit last-used allowlist if none given on this invocation
+            [[ "$allowlist_preset" == "code" && -n "${allowlist:-}" ]] && allowlist_preset="$allowlist"
         else
             echo "Specify a profile:  localclaude start <profile>" >&2
             echo "Run 'localclaude -h' for the list." >&2
@@ -182,6 +228,29 @@ do_start() {
         echo
     fi
 
+    # Resolve the allowlist preset to an actual flag value (or none).
+    local allowlist_tools=""
+    case "$allowlist_preset" in
+        code)
+            # Fastest prefill: only Claude Code's core file + shell tools.
+            # 99% reduction in tool-description bytes for typical Claude Code prompts.
+            allowlist_tools="Read,Edit,Bash,Grep,Glob,Write"
+            ;;
+        web)
+            # Code + web research (HF MCP and similar still pass through if
+            # the model emits compatible tool-call syntax).
+            allowlist_tools="Read,Edit,Bash,Grep,Glob,Write,WebSearch,WebFetch"
+            ;;
+        all|off|none)
+            allowlist_tools=""   # don't add the flag — full 274+ tool catalog passes through
+            ;;
+        *)
+            echo "Unknown -allowlist value: $allowlist_preset" >&2
+            echo "Try one of: code | web | all" >&2
+            return 1
+            ;;
+    esac
+
     # Build args
     local args=(
         serve "$model"
@@ -193,6 +262,7 @@ do_start() {
         --optimize-stub-tools
     )
     [[ -n "$reasoning_parser" ]] && args+=(--reasoning-parser "$reasoning_parser")
+    [[ -n "$allowlist_tools" ]] && args+=(--optimize-tool-allowlist "$allowlist_tools")
 
     # Prefer the user's local vllm-mlx repo (with optimizer + thinking-gate
     # patches) over any system-wide install. Picking up the local copy means
@@ -209,6 +279,7 @@ Starting profile: $profile
   model:            $model
   tool-parser:      $tool_parser
   reasoning-parser: ${reasoning_parser:-<none>}
+  allowlist:        $allowlist_preset${allowlist_tools:+ ($allowlist_tools)}
   log:              $log
 
 INTRO
@@ -219,6 +290,7 @@ profile=$profile
 model=$model
 port=$PORT
 log=$log
+allowlist=$allowlist_preset
 started=$(date -Iseconds)
 META
 
