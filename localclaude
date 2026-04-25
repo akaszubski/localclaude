@@ -63,11 +63,13 @@ Profiles:
 Allowlist presets (controls how aggressively the optimizer drops tools):
   minimal           Read,Edit,Bash,Grep,Glob,Write           ~99.5% reduction.
                                                               File ops + shell only.
-  code   (default)  All 24 Claude Code native tools          ~99% reduction.
-                                                              File + shell + Task +
-                                                              TodoWrite + WebSearch +
-                                                              WebFetch + plan mode + etc.
-                                                              MCP servers excluded.
+  code   (default)  35 Claude Code natives + searxng MCP     ~98% reduction.
+                                                              Full agentic toolkit
+                                                              + local web research
+                                                              via mcp__searxng__*.
+                                                              Other MCP servers
+                                                              (Gmail, Calendar, HA,
+                                                              etc.) are excluded.
   all               <no filter — all 274+ tools pass through> Slowest first prefill
                                                               (~50s for 80k tokens),
                                                               every MCP tool available.
@@ -243,17 +245,21 @@ do_start() {
             allowlist_tools="Read,Edit,Bash,Grep,Glob,Write"
             ;;
         code)
-            # All Claude Code 2.x native tools — full agentic toolkit
-            # (file ops + Bash + Task subagents + TodoWrite + plan mode +
-            # worktrees + cron + monitor + skill/slash + MCP discovery)
-            # without any MCP server tools. ~99% reduction for the 24 stubbed
-            # natives; the additional ~10 unstubbed natives pass through with
-            # original descriptions (~2k chars total — negligible).
-            allowlist_tools="Read,Edit,Write,Bash,Glob,Grep,Task,TodoWrite,ExitPlanMode,EnterPlanMode,NotebookEdit,WebFetch,WebSearch,BashOutput,KillShell,Skill,SlashCommand,TaskCreate,TaskUpdate,TaskGet,TaskList,TaskOutput,TaskStop,AskUserQuestion,Monitor,PushNotification,EnterWorktree,ExitWorktree,CronCreate,CronDelete,CronList,RemoteTrigger,ListMcpResourcesTool,ReadMcpResourceTool,ToolSearch"
+            # All Claude Code 2.x native tools (35) + the searxng MCP tools (2)
+            # — full agentic toolkit including local web research:
+            #   file ops + Bash + Task subagents + TodoWrite + plan mode +
+            #   worktrees + cron + monitor + skill/slash + MCP discovery +
+            #   web search/fetch via the local SearXNG container.
+            # Other MCP servers (Gmail, Calendar, Home Assistant, etc.) are
+            # filtered out to keep prefill fast. Total: ~3.7K chars sent in
+            # tool definitions vs ~195K with -allowlist all (98% reduction).
+            # Tools not registered on the user's machine are silently absent
+            # from the request, so naming them here is harmless.
+            allowlist_tools="Read,Edit,Write,Bash,Glob,Grep,Task,TodoWrite,ExitPlanMode,EnterPlanMode,NotebookEdit,WebFetch,WebSearch,BashOutput,KillShell,Skill,SlashCommand,TaskCreate,TaskUpdate,TaskGet,TaskList,TaskOutput,TaskStop,AskUserQuestion,Monitor,PushNotification,EnterWorktree,ExitWorktree,CronCreate,CronDelete,CronList,RemoteTrigger,ListMcpResourcesTool,ReadMcpResourceTool,ToolSearch,mcp__searxng__search,mcp__searxng__fetch"
             ;;
         web)
             # Alias for 'code' — kept for backwards compatibility.
-            allowlist_tools="Read,Edit,Write,Bash,Glob,Grep,Task,TodoWrite,ExitPlanMode,EnterPlanMode,NotebookEdit,WebFetch,WebSearch,BashOutput,KillShell,Skill,SlashCommand,TaskCreate,TaskUpdate,TaskGet,TaskList,TaskOutput,TaskStop,AskUserQuestion,Monitor,PushNotification,EnterWorktree,ExitWorktree,CronCreate,CronDelete,CronList,RemoteTrigger,ListMcpResourcesTool,ReadMcpResourceTool,ToolSearch"
+            allowlist_tools="Read,Edit,Write,Bash,Glob,Grep,Task,TodoWrite,ExitPlanMode,EnterPlanMode,NotebookEdit,WebFetch,WebSearch,BashOutput,KillShell,Skill,SlashCommand,TaskCreate,TaskUpdate,TaskGet,TaskList,TaskOutput,TaskStop,AskUserQuestion,Monitor,PushNotification,EnterWorktree,ExitWorktree,CronCreate,CronDelete,CronList,RemoteTrigger,ListMcpResourcesTool,ReadMcpResourceTool,ToolSearch,mcp__searxng__search,mcp__searxng__fetch"
             ;;
         all|off|none)
             allowlist_tools=""   # don't add the flag — full 274+ tool catalog passes through
