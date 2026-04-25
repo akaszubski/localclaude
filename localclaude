@@ -234,10 +234,18 @@ META
     disown $server_pid 2>/dev/null || true
     echo "server-pid=$server_pid"
 
-    # Wait for ready
-    echo "Waiting for model load (up to 5 min)…"
+    # Wait for ready. Total budget is 5 minutes for already-cached models, but
+    # a fresh download can easily take longer — when we see "Fetching N files"
+    # progress in the log, the deadline gets pushed out automatically.
+    local STEP_S=5
+    local BASE_TIMEOUT_S=300       # 5 min for load when weights already on disk
+    local DOWNLOAD_GRACE_S=900     # +15 min while a download is actively running
+    local deadline=$(( $(date +%s) + BASE_TIMEOUT_S ))
+    local downloading_announced=0
     local ready=0
-    for i in $(seq 1 60); do
+
+    echo "Waiting for model load (up to ${BASE_TIMEOUT_S}s; will extend if download is in progress)…"
+    while :; do
         if grep -q "Application startup complete" "$log" 2>/dev/null; then
             ready=1
             break
@@ -248,14 +256,30 @@ META
             tail -20 "$log"
             return 1
         fi
-        sleep 5
+        # If a download is in progress, extend the deadline so we don't kill
+        # ourselves mid-fetch.
+        if grep -qE "Fetching [0-9]+ files: *[0-9]+%" "$log" 2>/dev/null && \
+           ! grep -qE "Fetching [0-9]+ files: *100%" "$log" 2>/dev/null; then
+            if [[ $downloading_announced -eq 0 ]]; then
+                echo
+                echo "  (download in progress — extending timeout by ${DOWNLOAD_GRACE_S}s)"
+                downloading_announced=1
+            fi
+            deadline=$(( $(date +%s) + DOWNLOAD_GRACE_S ))
+        fi
+        if (( $(date +%s) >= deadline )); then
+            break
+        fi
+        sleep "$STEP_S"
         printf "."
     done
     echo
 
     if [[ $ready -ne 1 ]]; then
         echo "⚠ Timed out waiting for model load."
-        echo "  Tail the log:  tail -F $log"
+        echo "  The server may still be loading — check:"
+        echo "     tail -F $log"
+        echo "     localclaude status"
         return 1
     fi
 
