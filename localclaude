@@ -594,34 +594,34 @@ do_start() {
     # ── Remote dispatch ───────────────────────────────────────────
     # If this profile names a remote host AND the model isn't cached on this
     # machine AND we aren't already running on the remote (env var prevents
-    # recursion), bounce to the remote and tunnel back.
+    # recursion), bounce to the remote and connect directly over the network.
+    # We bind the remote server on its own IP (extracted from the SSH host),
+    # so callers on the same mesh can hit it directly without a tunnel.
     if [[ -n "$remote_host" ]] && [[ -z "${LOCALCLAUDE_NO_REMOTE:-}" ]] && ! _is_model_cached "$model"; then
-        echo "Profile $profile resolves to remote host: $remote_host"
-        echo "Model is not cached locally — running on remote + tunneling port $PORT…"
+        # Extract the bare host from user@host
+        local remote_ip="${remote_host##*@}"
+        echo "Profile $profile resolves to remote: $remote_host"
+        echo "Will bind the remote server on $remote_ip:$PORT and connect directly."
         echo
 
-        # Stop anything on the local port first (might be a stale tunnel).
+        # Clear any stale local listener (old tunnel from a previous version).
         if lsof -nP -iTCP:$PORT -sTCP:LISTEN >/dev/null 2>&1; then
             echo "Local port $PORT in use — clearing first…"
             do_stop
             echo
         fi
 
-        # Build the same args list (less the local-only PYTHONPATH bit) and
-        # invoke localclaude on the remote. Pass through the chosen allowlist.
-        local remote_cmd="localclaude start $profile -allowlist $allowlist_preset"
+        # Tell the remote to bind on its own mesh IP rather than loopback,
+        # so we can reach it directly without an SSH tunnel.
+        local remote_cmd="localclaude start $profile -allowlist $allowlist_preset -bind $remote_ip"
         echo "── Remote: $remote_host ──"
         if ! _remote_exec "$remote_host" "$remote_cmd" 2>&1 | sed 's/^/  /'; then
             echo "✗ Remote start failed."
             return 1
         fi
 
-        # Open the tunnel so claude on this machine can talk to the remote server.
-        echo
-        echo "── Tunnel ──"
-        _open_tunnel "$remote_host" || return 1
-
-        # Save active marker locally so `stop`/`status` know it's a remote.
+        # Save active marker locally — tracks the remote so `stop` can clean up,
+        # and bind_host so `cc` knows where to point ANTHROPIC_BASE_URL.
         cat > "$ACTIVE" <<META
 profile=$profile
 model=$model
@@ -629,13 +629,14 @@ port=$PORT
 log=remote://$remote_host
 allowlist=$allowlist_preset
 context_window=$context_window
+bind_host=$remote_ip
 remote_host=$remote_host
 started=$(date -Iseconds)
 META
 
         echo
-        echo "✓ Remote server ready at http://localhost:$PORT (tunneled to $remote_host)"
-        print_connect "$model" "$context_window"
+        echo "✓ Remote server ready at http://$remote_ip:$PORT"
+        print_connect "$model" "$context_window" "$remote_ip"
         return 0
     fi
 
