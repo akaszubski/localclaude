@@ -463,16 +463,24 @@ do_stop() {
 print_connect() {
     local model="$1"
     local context_window="${2:-}"
+    local bind_host="${3:-127.0.0.1}"
+    local host_in_url="$bind_host"
+    if [[ "$bind_host" == "127.0.0.1" || "$bind_host" == "localhost" ]]; then
+        host_in_url="localhost"
+    fi
     local extra_env=""
     if [[ -n "$context_window" ]]; then
         extra_env=" CLAUDE_CODE_AUTO_COMPACT_WINDOW=$context_window"
     fi
     cat <<CONNECT
 
-To connect Claude Code (run in another terminal):
+To connect Claude Code from a project directory:
 
-    cd ~/Dev/vllm-mlx           # or any project directory you want claude to work in
-    ANTHROPIC_BASE_URL=http://localhost:$PORT ANTHROPIC_API_KEY=not-needed ANTHROPIC_MODEL=$model$extra_env claude
+    localclaude cc                   # easiest — sets all env vars + runs claude
+
+Or manually (single line):
+
+    ANTHROPIC_BASE_URL=http://$host_in_url:$PORT ANTHROPIC_API_KEY=not-needed ANTHROPIC_MODEL=$model$extra_env claude
 
 When done, kill the server:
 
@@ -518,13 +526,14 @@ do_status() {
     echo
     echo "── Recent throughput ──"
     grep -E "Anthropic messages|first token after" "$log" 2>/dev/null | tail -4 || echo "(no requests yet)"
-    print_connect "$model" "${context_window:-}"
+    print_connect "$model" "${context_window:-}" "${bind_host:-127.0.0.1}"
 }
 
 # ── Start ─────────────────────────────────────────────────────────
 do_start() {
     local profile=""
     local allowlist_preset="code"   # default: tight allowlist for fast prefill
+    local bind_host="127.0.0.1"     # default: loopback (LAN-safe)
 
     # Parse args: profile name + optional flags. Order doesn't matter.
     while [[ $# -gt 0 ]]; do
@@ -537,9 +546,13 @@ do_start() {
                 allowlist_preset="all"
                 shift
                 ;;
+            -bind|--bind|-host|--host)
+                bind_host="${2:-}"
+                shift 2
+                ;;
             -*)
                 echo "Unknown flag: $1" >&2
-                echo "Available flags: -allowlist <code|web|all>  -all" >&2
+                echo "Available flags: -allowlist <code|all>  -bind <host>" >&2
                 return 1
                 ;;
             *)
@@ -704,6 +717,7 @@ META
     # Build args
     local args=(
         serve "$model"
+        --host "$bind_host"
         --port "$PORT"
         --continuous-batching
         --enable-auto-tool-choice
@@ -740,6 +754,7 @@ Starting profile: $profile
   tool-parser:      $tool_parser
   reasoning-parser: ${reasoning_parser:-<none>}
   allowlist:        $allowlist_preset
+  bind:             $bind_host:$PORT
   context-window:   ${context_window:-<unset>} tokens (auto-compact at ~80%)
   log:              $log
 
@@ -753,6 +768,7 @@ port=$PORT
 log=$log
 allowlist=$allowlist_preset
 context_window=$context_window
+bind_host=$bind_host
 remote_host=
 started=$(date -Iseconds)
 META
@@ -844,8 +860,10 @@ META
         return 1
     fi
 
-    echo "✓ Server ready at http://localhost:$PORT"
-    print_connect "$model" "$context_window"
+    local ready_host="$bind_host"
+    [[ "$bind_host" == "127.0.0.1" ]] && ready_host="localhost"
+    echo "✓ Server ready at http://$ready_host:$PORT"
+    print_connect "$model" "$context_window" "$bind_host"
 }
 
 # ── List cached ───────────────────────────────────────────────────
@@ -893,10 +911,13 @@ do_cc() {
     fi
     cd "$cwd"
 
-    echo "Launching claude attached to: $profile ($model) on http://localhost:$port"
+    local host_in_url="${bind_host:-127.0.0.1}"
+    [[ "$host_in_url" == "127.0.0.1" ]] && host_in_url="localhost"
+
+    echo "Launching claude attached to: $profile ($model) on http://$host_in_url:$port"
     echo
     exec env \
-        ANTHROPIC_BASE_URL="http://localhost:$port" \
+        ANTHROPIC_BASE_URL="http://$host_in_url:$port" \
         ANTHROPIC_API_KEY="not-needed" \
         ANTHROPIC_MODEL="$model" \
         "${extra[@]}" \
