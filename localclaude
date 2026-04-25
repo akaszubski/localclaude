@@ -373,6 +373,8 @@ Usage:
                                  print the claude command to connect in another terminal.
   localclaude stop               Kill the running server.
   localclaude restart            Restart the last-active profile (inherits allowlist).
+  localclaude cc                 Launch claude attached to the active profile.
+                                 (Bypasses the multi-env-var copy-paste.)
   localclaude status             Show running model + the claude connect command.
   localclaude list               List cached MLX models on this Mac.
   localclaude doctor             Diagnose the full local-Claude-Code stack.
@@ -864,6 +866,43 @@ list_cached() {
     done
 }
 
+# ── cc: launch claude attached to the active profile ─────────────
+# Reads ~/.localclaude/.active, sets all the env vars (BASE_URL,
+# API_KEY, MODEL, AUTO_COMPACT_WINDOW), and exec's `claude` from the
+# current directory. Avoids the multi-env-var copy-paste fragility
+# where line-wrapping in the terminal eats the env block.
+do_cc() {
+    if [[ ! -f "$ACTIVE" ]]; then
+        echo "No active profile. Start one first: localclaude start <profile>" >&2
+        return 1
+    fi
+    # shellcheck disable=SC1090
+    source "$ACTIVE"
+    if ! lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+        echo "No server on port $port. Start one: localclaude start $profile" >&2
+        return 1
+    fi
+    local extra=()
+    [[ -n "${context_window:-}" ]] && extra+=(CLAUDE_CODE_AUTO_COMPACT_WINDOW="$context_window")
+
+    # Avoid running from $HOME (Glob will time out scanning the whole home dir).
+    local cwd="$PWD"
+    if [[ "$cwd" == "$HOME" ]]; then
+        cwd="$HOME/Dev/vllm-mlx"
+        echo "(switching cwd to $cwd to avoid Glob timeout in \$HOME)" >&2
+    fi
+    cd "$cwd"
+
+    echo "Launching claude attached to: $profile ($model) on http://localhost:$port"
+    echo
+    exec env \
+        ANTHROPIC_BASE_URL="http://localhost:$port" \
+        ANTHROPIC_API_KEY="not-needed" \
+        ANTHROPIC_MODEL="$model" \
+        "${extra[@]}" \
+        claude "$@"
+}
+
 # ── Restart shortcut ──────────────────────────────────────────────
 do_restart() {
     if [[ ! -f "$ACTIVE" ]]; then
@@ -886,6 +925,7 @@ case "${1:-}" in
     list)              list_cached ;;
     doctor|check)      do_doctor ;;
     test)              do_test ;;
+    cc|claude)         shift; do_cc "$@" ;;
     *)
         echo "Unknown subcommand: $1" >&2
         help >&2
