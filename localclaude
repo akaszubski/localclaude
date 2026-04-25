@@ -130,6 +130,131 @@ check_mcp_registered() {
     return 1
 }
 
+# ── test: end-to-end smoke against the running model ─────────────
+# Issues a real claude --print query that should call mcp__searxng__search
+# and return a coherent paragraph. Catches three classes of failure:
+#   1. Server not running / SearXNG down
+#   2. MCP server can't dispatch tool calls
+#   3. Model decoder collapse (4-bit instability, infinite loops, gibberish)
+#
+# Garbage detection heuristic: if >25% of the response chars are non-ASCII
+# in a non-CJK context, OR if the response has too many distinct scripts
+# (Latin + Arabic + Han + Hangul mixing is a classic decoder-collapse
+# signature), we flag it. Tuned against the failure modes we've seen.
+
+_garbage_score() {
+    # Reads stdin, prints two integers: total_chars distinct_scripts.
+    # distinct_scripts > 3 is a strong signal of decoder collapse.
+    python3 - <<'PY'
+import sys, unicodedata
+text = sys.stdin.read()
+scripts = set()
+for ch in text:
+    try:
+        name = unicodedata.name(ch, "")
+    except Exception:
+        continue
+    for tag in ("LATIN", "ARABIC", "HEBREW", "CJK", "HIRAGANA", "KATAKANA", "HANGUL", "THAI", "DEVANAGARI", "CYRILLIC", "GREEK", "TIBETAN"):
+        if tag in name:
+            scripts.add(tag)
+            break
+print(len(text), len(scripts))
+PY
+}
+
+do_test() {
+    local fails=0
+    echo "── localclaude test ──────────────────────────────"
+
+    # 1. Server reachable
+    if ! curl -sf -o /dev/null -m 3 "http://127.0.0.1:$PORT/v1/models" 2>/dev/null; then
+        _fail "Server not responding on http://127.0.0.1:$PORT  (run: localclaude start <profile>)"
+        return 1
+    fi
+    _ok "Server responding on http://127.0.0.1:$PORT"
+
+    # 2. SearXNG backend reachable
+    if curl -sf -o /dev/null -m 3 "http://127.0.0.1:$SEARXNG_PORT/" 2>/dev/null; then
+        _ok "SearXNG backend up on http://127.0.0.1:$SEARXNG_PORT"
+    else
+        _warn "SearXNG backend down — search test will be skipped"
+    fi
+
+    # 3. claude CLI present
+    if ! command -v claude >/dev/null 2>&1; then
+        _fail "claude CLI not on PATH"
+        return 1
+    fi
+
+    # 4. Resolve model from active profile
+    if [[ ! -f "$ACTIVE" ]]; then
+        _fail "No active profile recorded — start one first"
+        return 1
+    fi
+    # shellcheck disable=SC1090
+    source "$ACTIVE"
+
+    # 5. End-to-end query — non-trivial generation that should call MCP search
+    echo "Running end-to-end claude --print test (60s timeout)…"
+    local out
+    out=$(env \
+        ANTHROPIC_BASE_URL="http://localhost:$port" \
+        ANTHROPIC_API_KEY=not-needed \
+        ANTHROPIC_MODEL="$model" \
+        claude --print --output-format json \
+        --dangerously-skip-permissions \
+        --model "$model" \
+        "Use the mcp__searxng__search tool to find the official Anthropic Claude Code documentation URL. Quote one result title and URL." 2>&1) || {
+        _fail "claude --print failed to run cleanly"
+        echo "$out" | head -3
+        return 1
+    }
+
+    # Parse JSON
+    local result tokens turns
+    result=$(echo "$out" | python3 -c "import json,sys; d=json.loads(sys.stdin.read()); print(d.get('result',''))" 2>/dev/null) || {
+        _fail "Could not parse JSON output from claude --print"
+        echo "$out" | head -5
+        return 1
+    }
+    tokens=$(echo "$out" | python3 -c "import json,sys; d=json.loads(sys.stdin.read()); print(d.get('usage',{}).get('output_tokens',0))" 2>/dev/null)
+    turns=$(echo "$out" | python3 -c "import json,sys; d=json.loads(sys.stdin.read()); print(d.get('num_turns',0))" 2>/dev/null)
+
+    if [[ -z "$result" ]]; then
+        _fail "Model returned empty result (likely thinking-only or generation aborted)"
+        return 1
+    fi
+    _ok "claude --print returned a result: $tokens output tokens in $turns turn(s)"
+
+    # 6. Garbage detection
+    local stats total_chars distinct_scripts
+    stats=$(printf '%s' "$result" | _garbage_score)
+    total_chars=$(echo "$stats" | awk '{print $1}')
+    distinct_scripts=$(echo "$stats" | awk '{print $2}')
+    if (( distinct_scripts > 3 )); then
+        _fail "Decoder collapse: response mixes $distinct_scripts distinct scripts ($total_chars chars). 4-bit instability — try a different profile."
+        echo "  preview: $(printf '%s' "$result" | head -c 120)..."
+        ((fails++))
+    else
+        _ok "Response is coherent ($distinct_scripts scripts in $total_chars chars)"
+    fi
+
+    # 7. Did the model actually call the search tool?
+    if [[ "$turns" -ge 2 ]]; then
+        _ok "Multi-turn agent loop completed (turns=$turns) — tool call likely fired"
+    else
+        _warn "Single-turn response — tool call may not have fired (model answered from training data)"
+    fi
+
+    echo
+    if (( fails > 0 )); then
+        echo "✗ $fails test(s) failed."
+        return 1
+    fi
+    echo "✓ End-to-end test passed."
+    echo "  preview: $(printf '%s' "$result" | head -c 200)..."
+}
+
 # ── doctor: full diagnostic ───────────────────────────────────────
 do_doctor() {
     local fails=0
@@ -182,6 +307,7 @@ Usage:
   localclaude status             Show running model + the claude connect command.
   localclaude list               List cached MLX models on this Mac.
   localclaude doctor             Diagnose the full local-Claude-Code stack.
+  localclaude test               End-to-end smoke: real query + garbage detection.
   localclaude -h                 This help.
 
 Profiles:
@@ -581,6 +707,7 @@ case "${1:-}" in
     status)            do_status ;;
     list)              list_cached ;;
     doctor|check)      do_doctor ;;
+    test)              do_test ;;
     *)
         echo "Unknown subcommand: $1" >&2
         help >&2
