@@ -720,6 +720,16 @@ META
         pythonpath_prefix="PYTHONPATH=$HOME/Dev/vllm-mlx"
     fi
 
+    # If the model is fully cached, tell huggingface_hub to skip network
+    # validation. vllm-mlx otherwise does a HEAD round-trip per shard on
+    # every start (~2-3 sec each, up to 3 min for the 480B). HF cache files
+    # are content-addressed by SHA, so this is wasted work.
+    local hf_offline_prefix=""
+    if _is_model_cached "$model"; then
+        hf_offline_prefix="HF_HUB_OFFLINE=1"
+        echo "  (model is fully cached → setting HF_HUB_OFFLINE=1 to skip HF validation)"
+    fi
+
     local log="$LOG_DIR/$profile.log"
 
     cat <<INTRO
@@ -745,11 +755,13 @@ remote_host=
 started=$(date -Iseconds)
 META
 
-    # Launch detached. PYTHONPATH prefix (if any) ensures we use the user's
-    # local patched repo over any system vllm-mlx.
+    # Launch detached. PYTHONPATH and HF_HUB_OFFLINE prefixes (if any) ensure
+    # we use the user's local patched repo and skip needless HF validation.
     cd "$HOME/Dev/vllm-mlx" 2>/dev/null || cd "$HOME"
-    if [[ -n "$pythonpath_prefix" ]]; then
-        nohup env $pythonpath_prefix vllm-mlx "${args[@]}" > "$log" 2>&1 &
+    local env_prefix
+    env_prefix=$(printf '%s ' $pythonpath_prefix $hf_offline_prefix | sed 's/ *$//')
+    if [[ -n "$env_prefix" ]]; then
+        nohup env $env_prefix vllm-mlx "${args[@]}" > "$log" 2>&1 &
     else
         nohup vllm-mlx "${args[@]}" > "$log" 2>&1 &
     fi
