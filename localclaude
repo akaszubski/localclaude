@@ -358,10 +358,13 @@ _close_tunnel() {
 
 # Run a command on the remote host. Sets LOCALCLAUDE_NO_REMOTE=1 so any
 # `localclaude` invocation there knows it's already on the destination
-# machine and won't try to bounce again.
+# machine and won't try to bounce again. Also extends PATH because
+# non-interactive SSH shells don't source ~/.zshrc, so neither
+# ~/Dev/localclaude nor ~/.orbstack/bin would be found.
 _remote_exec() {
     local host="$1"; shift
-    ssh -o BatchMode=yes "$host" "LOCALCLAUDE_NO_REMOTE=1 $*"
+    local path_prefix='export PATH="$HOME/Dev/localclaude:$HOME/.orbstack/bin:$PATH";'
+    ssh -o BatchMode=yes "$host" "$path_prefix LOCALCLAUDE_NO_REMOTE=1 $*"
 }
 
 # ── Help ──────────────────────────────────────────────────────────
