@@ -61,18 +61,21 @@ Profiles:
   gemma4      gemma-4-31b-it-4bit                      Google dense 31B (cached)
 
 Allowlist presets (controls how aggressively the optimizer drops tools):
-  code   (default)  Read,Edit,Bash,Grep,Glob,Write          ~99% prefill reduction,
-                                                             no MCP/web tools.
-  web              code + WebSearch + WebFetch              Adds research tools.
-  all              <no filter — all 274+ tools pass through> Slowest first prefill
-                                                             (~50s for 80k tokens),
-                                                             but every MCP tool
-                                                             stays available.
+  minimal           Read,Edit,Bash,Grep,Glob,Write           ~99.5% reduction.
+                                                              File ops + shell only.
+  code   (default)  All 24 Claude Code native tools          ~99% reduction.
+                                                              File + shell + Task +
+                                                              TodoWrite + WebSearch +
+                                                              WebFetch + plan mode + etc.
+                                                              MCP servers excluded.
+  all               <no filter — all 274+ tools pass through> Slowest first prefill
+                                                              (~50s for 80k tokens),
+                                                              every MCP tool available.
 
 Examples:
-  localclaude start coder                       # default fast (-allowlist code)
-  localclaude start coder -allowlist all        # all MCP tools, slow first prefill
-  localclaude start qwen36 -allowlist web       # research-capable
+  localclaude start coder                       # default: full Claude Code natives, fast
+  localclaude start coder -allowlist all        # add all MCP tools (Gmail, HF, etc), slow
+  localclaude start coder -allowlist minimal    # bare-bones, fastest prefill
 
 Only ONE server runs at a time. \`start\` always stops any existing
 vllm-mlx on port $PORT first, so you'll never accidentally have two running.
@@ -229,24 +232,33 @@ do_start() {
     fi
 
     # Resolve the allowlist preset to an actual flag value (or none).
+    # Each preset is a comma-list of tool names the model is allowed to see.
+    # Tools NOT in the list are dropped from the request entirely.
+    # All native Claude Code tools have entries in the optimizer's STUBS table,
+    # so even the wide presets stay tiny in token count.
     local allowlist_tools=""
     case "$allowlist_preset" in
-        code)
-            # Fastest prefill: only Claude Code's core file + shell tools.
-            # 99% reduction in tool-description bytes for typical Claude Code prompts.
+        minimal)
+            # Bare-bones file + shell ops only. ~99.5% reduction.
             allowlist_tools="Read,Edit,Bash,Grep,Glob,Write"
             ;;
+        code)
+            # All 24 Claude Code native tools — the full agentic toolkit
+            # (file ops + Bash + Task subagents + TodoWrite + plan mode + etc.)
+            # without any MCP servers. ~99% reduction since all are stubbed.
+            allowlist_tools="Read,Edit,Write,Bash,Glob,Grep,Task,TodoWrite,ExitPlanMode,EnterPlanMode,NotebookEdit,WebFetch,WebSearch,BashOutput,KillShell,Skill,SlashCommand,TaskCreate,TaskUpdate,TaskGet,TaskList,TaskOutput,TaskStop,AskUserQuestion"
+            ;;
         web)
-            # Code + web research (HF MCP and similar still pass through if
-            # the model emits compatible tool-call syntax).
-            allowlist_tools="Read,Edit,Bash,Grep,Glob,Write,WebSearch,WebFetch"
+            # Alias for 'code' — kept for backwards compatibility.
+            # The 'code' preset already includes WebSearch + WebFetch.
+            allowlist_tools="Read,Edit,Write,Bash,Glob,Grep,Task,TodoWrite,ExitPlanMode,EnterPlanMode,NotebookEdit,WebFetch,WebSearch,BashOutput,KillShell,Skill,SlashCommand,TaskCreate,TaskUpdate,TaskGet,TaskList,TaskOutput,TaskStop,AskUserQuestion"
             ;;
         all|off|none)
             allowlist_tools=""   # don't add the flag — full 274+ tool catalog passes through
             ;;
         *)
             echo "Unknown -allowlist value: $allowlist_preset" >&2
-            echo "Try one of: code | web | all" >&2
+            echo "Try one of: minimal | code | all" >&2
             return 1
             ;;
     esac
