@@ -22,7 +22,137 @@ STATE_HOME="$HOME/.localclaude"
 LOG_DIR="$STATE_HOME/logs"
 ACTIVE="$STATE_HOME/.active"
 PORT=8000
+SEARXNG_MCP_DIR="${LOCALCLAUDE_SEARXNG_MCP_DIR:-$HOME/Dev/searxng-mcp}"
+SEARXNG_PORT=8080
 mkdir -p "$LOG_DIR"
+
+# ── Tiny output helpers ───────────────────────────────────────────
+_ok()    { printf "  \033[32m✓\033[0m %s\n" "$1"; }
+_warn()  { printf "  \033[33m⚠\033[0m %s\n" "$1"; }
+_fail()  { printf "  \033[31m✗\033[0m %s\n" "$1"; }
+
+# ── Dependency checks ─────────────────────────────────────────────
+# Each function exits 0 (ok) or 1 (broken). They print a one-liner about
+# what they checked. Used by `doctor`, and a subset is run before `start`
+# (with non-fatal warnings) so users see problems early.
+
+check_vllm_mlx() {
+    if command -v vllm-mlx >/dev/null 2>&1; then
+        _ok "vllm-mlx CLI on PATH ($(command -v vllm-mlx))"
+        return 0
+    fi
+    _fail "vllm-mlx CLI not found — install it (pip install vllm-mlx, or clone the fork)"
+    return 1
+}
+
+check_claude_cli() {
+    if command -v claude >/dev/null 2>&1; then
+        local ver
+        ver=$(claude --version 2>/dev/null | head -1)
+        _ok "claude CLI on PATH ($ver)"
+        return 0
+    fi
+    _fail "claude CLI not found — install Claude Code from anthropic.com/claude/code"
+    return 1
+}
+
+check_local_vllm_mlx_repo() {
+    if [[ -d "$HOME/Dev/vllm-mlx/vllm_mlx" ]]; then
+        _ok "local vllm-mlx repo at ~/Dev/vllm-mlx (used via PYTHONPATH override)"
+        return 0
+    fi
+    _warn "no ~/Dev/vllm-mlx repo — server will use whatever vllm-mlx is on PATH"
+    _warn "  (clone the patched fork for thinking-gate + optimizer features:"
+    _warn "   git clone https://github.com/akaszubski/vllm-mlx.git ~/Dev/vllm-mlx)"
+    return 1
+}
+
+check_docker() {
+    if command -v docker >/dev/null 2>&1; then
+        if docker info >/dev/null 2>&1; then
+            _ok "docker available + daemon running"
+            return 0
+        fi
+        _warn "docker installed but daemon not running (start OrbStack/Docker)"
+        return 1
+    fi
+    _warn "docker CLI not found — needed to run the SearXNG container"
+    _warn "  (OrbStack: brew install orbstack; or add ~/.orbstack/bin to PATH)"
+    return 1
+}
+
+check_searxng_container() {
+    if ! command -v docker >/dev/null 2>&1; then
+        return 1
+    fi
+    local cid
+    cid=$(docker ps --filter "name=localclaude-searxng" --format '{{.ID}}' 2>/dev/null | head -1)
+    if [[ -z "$cid" ]]; then
+        _warn "SearXNG container not running — start with: cd $SEARXNG_MCP_DIR && docker compose up -d"
+        return 1
+    fi
+    if curl -sk -o /dev/null -m 3 "http://127.0.0.1:$SEARXNG_PORT/" 2>/dev/null; then
+        _ok "SearXNG container up + responding on http://127.0.0.1:$SEARXNG_PORT"
+        return 0
+    fi
+    _warn "SearXNG container is up but not responding on http://127.0.0.1:$SEARXNG_PORT"
+    return 1
+}
+
+check_searxng_mcp_venv() {
+    if [[ ! -x "$SEARXNG_MCP_DIR/run.sh" ]]; then
+        _warn "searxng-mcp not installed — clone https://github.com/akaszubski/searxng-mcp to $SEARXNG_MCP_DIR"
+        return 1
+    fi
+    if [[ ! -x "$SEARXNG_MCP_DIR/.venv/bin/python" ]]; then
+        _warn "searxng-mcp venv missing — run: cd $SEARXNG_MCP_DIR && python3 -m venv .venv && .venv/bin/pip install mcp httpx"
+        return 1
+    fi
+    if "$SEARXNG_MCP_DIR/.venv/bin/python" -c "import mcp, httpx" 2>/dev/null; then
+        _ok "searxng-mcp venv has mcp + httpx"
+        return 0
+    fi
+    _warn "searxng-mcp venv exists but missing deps — run: $SEARXNG_MCP_DIR/.venv/bin/pip install mcp httpx"
+    return 1
+}
+
+check_mcp_registered() {
+    if ! command -v claude >/dev/null 2>&1; then
+        return 1
+    fi
+    # `claude mcp list` exits 0 and prints registered servers; format may
+    # change between versions, so just look for the name as a substring.
+    if claude mcp list 2>/dev/null | grep -qi "searxng"; then
+        _ok "searxng MCP registered with Claude Code"
+        return 0
+    fi
+    _warn "searxng MCP not registered — run: claude mcp add searxng -- $SEARXNG_MCP_DIR/run.sh"
+    return 1
+}
+
+# ── doctor: full diagnostic ───────────────────────────────────────
+do_doctor() {
+    local fails=0
+    echo "── localclaude doctor ────────────────────────────────"
+    echo
+    echo "Required:"
+    check_vllm_mlx || ((fails++))
+    check_claude_cli || ((fails++))
+    echo
+    echo "Recommended (full Claude-Code-on-local-LLM stack):"
+    check_local_vllm_mlx_repo || true   # warn-only
+    check_docker || true
+    check_searxng_container || true
+    check_searxng_mcp_venv || true
+    check_mcp_registered || true
+    echo
+    if (( fails > 0 )); then
+        echo "✗ $fails required check(s) failed. Fix them before \`start\`."
+        return 1
+    fi
+    echo "✓ Required deps in place. Recommended items above are optional but unlock web research."
+    return 0
+}
 
 # ── Profile catalog ───────────────────────────────────────────────
 profile_resolve() {
@@ -51,6 +181,7 @@ Usage:
   localclaude restart            Restart the last-active profile (inherits allowlist).
   localclaude status             Show running model + the claude connect command.
   localclaude list               List cached MLX models on this Mac.
+  localclaude doctor             Diagnose the full local-Claude-Code stack.
   localclaude -h                 This help.
 
 Profiles:
@@ -225,6 +356,23 @@ do_start() {
     }
     local model tool_parser reasoning_parser
     IFS='|' read -r model tool_parser reasoning_parser <<<"$resolved"
+
+    # Required dependency check — bail early with a clear error.
+    if ! command -v vllm-mlx >/dev/null 2>&1; then
+        _fail "vllm-mlx CLI not found on PATH — run \`localclaude doctor\` for details"
+        return 1
+    fi
+
+    # Soft checks: warn but don't block. Skipped on -allowlist all where
+    # the user explicitly opted into having to register MCP themselves.
+    if [[ "$allowlist_preset" != "all" ]]; then
+        if ! docker ps --filter "name=localclaude-searxng" --format '{{.ID}}' 2>/dev/null | grep -q .; then
+            _warn "SearXNG container not running — \`mcp__searxng__*\` tools won't work"
+            _warn "   start it with: cd $SEARXNG_MCP_DIR && docker compose up -d"
+            _warn "   (or run: localclaude doctor)"
+            echo
+        fi
+    fi
 
     # Always stop anything on the port — single-server invariant.
     if lsof -nP -iTCP:$PORT -sTCP:LISTEN >/dev/null 2>&1; then
@@ -412,11 +560,12 @@ do_restart() {
 # ── Dispatch ──────────────────────────────────────────────────────
 case "${1:-}" in
     ""|-h|--help|help) help ;;
-    start)             shift; do_start "${1:-}" ;;
+    start)             shift; do_start "$@" ;;
     stop)              do_stop ;;
     restart)           do_restart ;;
     status)            do_status ;;
     list)              list_cached ;;
+    doctor|check)      do_doctor ;;
     *)
         echo "Unknown subcommand: $1" >&2
         help >&2
