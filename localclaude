@@ -1,0 +1,294 @@
+#!/usr/bin/env bash
+# localclaude — manage one local vllm-mlx server, print Claude Code connect commands.
+#
+# Lifecycle:
+#   localclaude start <profile>    Kill any existing server, start the chosen profile
+#                                  detached, wait for "Application startup complete",
+#                                  then print the claude command to run in another terminal.
+#   localclaude stop               Kill the running server.
+#   localclaude status             Show what's running + the claude connect command.
+#   localclaude list               List cached models on this Mac.
+#   localclaude restart            Same as start, using last-active profile.
+#   localclaude -h                 This help.
+#
+# Only ONE vllm-mlx server is allowed on port 8000. `start` always kills any
+# existing process there before launching, so you can't accidentally run two.
+
+set -euo pipefail
+
+# ── Paths ─────────────────────────────────────────────────────────
+# State lives in ~/.localclaude/ so the script itself can live anywhere on PATH.
+STATE_HOME="$HOME/.localclaude"
+LOG_DIR="$STATE_HOME/logs"
+ACTIVE="$STATE_HOME/.active"
+PORT=8000
+mkdir -p "$LOG_DIR"
+
+# ── Profile catalog ───────────────────────────────────────────────
+profile_resolve() {
+    case "$1" in
+        coder)       echo "mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit|qwen3_coder|" ;;
+        coder-next)  echo "lmstudio-community/Qwen3-Coder-Next-MLX-8bit|qwen3_coder|" ;;
+        opus)        echo "mlx-community/Qwen3.5-27B-Claude-4.6-Opus-Distilled-MLX-4bit|qwen|qwen3" ;;
+        instruct)    echo "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit|qwen|qwen3" ;;
+        qwen36)      echo "mlx-community/Qwen3.6-35B-A3B-4bit|qwen|qwen3" ;;
+        gemma4)      echo "mlx-community/gemma-4-31b-it-4bit|gemma4|" ;;
+        *) return 1 ;;
+    esac
+}
+
+# ── Help ──────────────────────────────────────────────────────────
+help() {
+    cat <<USAGE
+Usage:
+  localclaude start <profile>    Kill any existing server, start chosen profile,
+                                 print the claude command to connect in another terminal.
+  localclaude stop               Kill the running server.
+  localclaude restart            Restart the last-active profile.
+  localclaude status             Show running model + the claude connect command.
+  localclaude list               List cached MLX models on this Mac.
+  localclaude -h                 This help.
+
+Profiles:
+  coder       Qwen3-Coder-30B-A3B-Instruct-4bit       MoE A3B coder, ~120 tok/s
+  coder-next  Qwen3-Coder-Next-MLX-8bit                8-bit, best SWE-bench Pass@5
+  opus        Qwen3.5-27B-Claude-4.6-Opus-Distilled    Claude-style dense 27B
+  instruct    Qwen3-30B-A3B-Instruct-2507-4bit         general MoE baseline
+  qwen36      Qwen3.6-35B-A3B-4bit                     newest, beats Gemma 4 (download)
+  gemma4      gemma-4-31b-it-4bit                      Google dense 31B (cached)
+
+Only ONE server runs at a time. \`start\` always stops any existing
+vllm-mlx on port $PORT first, so you'll never accidentally have two running.
+USAGE
+}
+
+# ── Stop (also clears the active marker) ──────────────────────────
+do_stop() {
+    local pid
+    pid=$(lsof -nP -iTCP:$PORT -sTCP:LISTEN 2>/dev/null | awk 'NR==2 {print $2}' || true)
+    if [[ -z "${pid:-}" ]]; then
+        echo "Nothing listening on port $PORT."
+        rm -f "$ACTIVE"
+        return 0
+    fi
+    local cmd
+    cmd=$(ps -p "$pid" -o command= 2>/dev/null | head -c 80 || echo "(unknown)")
+    echo "Stopping PID $pid ($cmd)…"
+    kill "$pid" 2>/dev/null || true
+    for i in 1 2 3 4 5; do
+        sleep 1
+        if ! lsof -nP -iTCP:$PORT -sTCP:LISTEN >/dev/null 2>&1; then
+            break
+        fi
+    done
+    if lsof -nP -iTCP:$PORT -sTCP:LISTEN >/dev/null 2>&1; then
+        echo "Port still held — sending SIGKILL…"
+        kill -9 "$pid" 2>/dev/null || true
+        sleep 1
+    fi
+    echo "✓ Port $PORT free."
+    rm -f "$ACTIVE"
+}
+
+# ── Print the claude connect block ────────────────────────────────
+print_connect() {
+    local model="$1"
+    cat <<CONNECT
+
+To connect Claude Code (run in another terminal):
+
+    cd ~/Dev/vllm-mlx           # or any project directory you want claude to work in
+    ANTHROPIC_BASE_URL=http://localhost:$PORT ANTHROPIC_API_KEY=not-needed ANTHROPIC_MODEL=$model claude
+
+When done, kill the server:
+
+    localclaude stop
+
+CONNECT
+}
+
+# ── Status ────────────────────────────────────────────────────────
+do_status() {
+    local pid_on_port
+    pid_on_port=$(lsof -nP -iTCP:$PORT -sTCP:LISTEN 2>/dev/null | awk 'NR==2 {print $2}' || true)
+
+    if [[ ! -f "$ACTIVE" ]]; then
+        if [[ -n "${pid_on_port:-}" ]]; then
+            echo "No active profile recorded, but port $PORT is held by PID $pid_on_port:"
+            ps -p "$pid_on_port" -o pid,user,command 2>/dev/null | head -2
+            echo
+            echo "If this is a stale vllm-mlx, run: localclaude stop"
+        else
+            echo "No server running. Start one with:  localclaude start <profile>"
+        fi
+        return 0
+    fi
+
+    # shellcheck disable=SC1090
+    source "$ACTIVE"
+
+    if [[ -z "${pid_on_port:-}" ]]; then
+        echo "Active profile recorded ($profile) but no server on port $port."
+        echo "Restart:  localclaude restart"
+        return 1
+    fi
+
+    echo "Active profile : $profile"
+    echo "Model          : $model"
+    echo "Port           : $port (PID $pid_on_port)"
+    echo "Started        : $started"
+    echo "Log            : $log"
+    echo
+    echo "── Recent optimizer + gate fires ──"
+    grep -E "OPTIMIZER|thinking-gate|thinking-leak" "$log" 2>/dev/null | tail -4 || echo "(none yet)"
+    echo
+    echo "── Recent throughput ──"
+    grep -E "Anthropic messages|first token after" "$log" 2>/dev/null | tail -4 || echo "(no requests yet)"
+    print_connect "$model"
+}
+
+# ── Start ─────────────────────────────────────────────────────────
+do_start() {
+    local profile="${1:-}"
+
+    # No profile? Try restart of last-active.
+    if [[ -z "$profile" ]]; then
+        if [[ -f "$ACTIVE" ]]; then
+            # shellcheck disable=SC1090
+            source "$ACTIVE"
+            echo "No profile given — restarting last: $profile"
+        else
+            echo "Specify a profile:  localclaude start <profile>" >&2
+            echo "Run 'localclaude -h' for the list." >&2
+            return 1
+        fi
+    fi
+
+    local resolved
+    resolved=$(profile_resolve "$profile") || {
+        echo "Unknown profile: $profile" >&2
+        echo "Run 'localclaude -h' for profiles, or 'localclaude list' for cached models." >&2
+        return 1
+    }
+    local model tool_parser reasoning_parser
+    IFS='|' read -r model tool_parser reasoning_parser <<<"$resolved"
+
+    # Always stop anything on the port — single-server invariant.
+    if lsof -nP -iTCP:$PORT -sTCP:LISTEN >/dev/null 2>&1; then
+        echo "Port $PORT in use — stopping existing first…"
+        do_stop
+        echo
+    fi
+
+    # Build args
+    local args=(
+        serve "$model"
+        --port "$PORT"
+        --continuous-batching
+        --enable-auto-tool-choice
+        --tool-call-parser "$tool_parser"
+        --optimize-prompts
+        --optimize-stub-tools
+    )
+    [[ -n "$reasoning_parser" ]] && args+=(--reasoning-parser "$reasoning_parser")
+
+    local log="$LOG_DIR/$profile.log"
+
+    cat <<INTRO
+Starting profile: $profile
+  model:            $model
+  tool-parser:      $tool_parser
+  reasoning-parser: ${reasoning_parser:-<none>}
+  log:              $log
+
+INTRO
+
+    # Save active marker
+    cat > "$ACTIVE" <<META
+profile=$profile
+model=$model
+port=$PORT
+log=$log
+started=$(date -Iseconds)
+META
+
+    # Launch detached
+    cd "$HOME/Dev/vllm-mlx"
+    nohup vllm-mlx "${args[@]}" > "$log" 2>&1 &
+    local server_pid=$!
+    disown $server_pid 2>/dev/null || true
+    echo "server-pid=$server_pid"
+
+    # Wait for ready
+    echo "Waiting for model load (up to 5 min)…"
+    local ready=0
+    for i in $(seq 1 60); do
+        if grep -q "Application startup complete" "$log" 2>/dev/null; then
+            ready=1
+            break
+        fi
+        if grep -qE "ERROR|Traceback|address already in use" "$log" 2>/dev/null; then
+            echo
+            echo "✗ Server failed. Last 20 log lines:"
+            tail -20 "$log"
+            return 1
+        fi
+        sleep 5
+        printf "."
+    done
+    echo
+
+    if [[ $ready -ne 1 ]]; then
+        echo "⚠ Timed out waiting for model load."
+        echo "  Tail the log:  tail -F $log"
+        return 1
+    fi
+
+    echo "✓ Server ready at http://localhost:$PORT"
+    print_connect "$model"
+}
+
+# ── List cached ───────────────────────────────────────────────────
+list_cached() {
+    echo "── Cached MLX models in ~/Models/ ──"
+    if [[ ! -d "$HOME/Models" ]]; then
+        echo "  (no ~/Models directory)"
+        return 0
+    fi
+    find "$HOME/Models" -maxdepth 1 -type d -name "models--*" 2>/dev/null | sort | while read -r d; do
+        local mid
+        mid=$(basename "$d" | sed -e 's|^models--||' -e 's|--|/|')
+        if find "$d/snapshots" -maxdepth 2 -name "*.safetensors" -print -quit 2>/dev/null | grep -q .; then
+            local size
+            size=$(du -sh "$d" 2>/dev/null | awk '{print $1}')
+            printf "  %6s  %s\n" "$size" "$mid"
+        fi
+    done
+}
+
+# ── Restart shortcut ──────────────────────────────────────────────
+do_restart() {
+    if [[ ! -f "$ACTIVE" ]]; then
+        echo "No last-active profile to restart." >&2
+        echo "Pick one:  localclaude start <profile>" >&2
+        return 1
+    fi
+    # shellcheck disable=SC1090
+    source "$ACTIVE"
+    do_start "$profile"
+}
+
+# ── Dispatch ──────────────────────────────────────────────────────
+case "${1:-}" in
+    ""|-h|--help|help) help ;;
+    start)             shift; do_start "${1:-}" ;;
+    stop)              do_stop ;;
+    restart)           do_restart ;;
+    status)            do_status ;;
+    list)              list_cached ;;
+    *)
+        echo "Unknown subcommand: $1" >&2
+        help >&2
+        exit 1
+        ;;
+esac
