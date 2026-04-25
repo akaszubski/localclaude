@@ -755,6 +755,10 @@ remote_host=
 started=$(date -Iseconds)
 META
 
+    # Truncate the log so old runs' ERROR lines don't trigger false-positive
+    # failure detection in the wait loop below.
+    : > "$log"
+
     # Launch detached. PYTHONPATH and HF_HUB_OFFLINE prefixes (if any) ensure
     # we use the user's local patched repo and skip needless HF validation.
     cd "$HOME/Dev/vllm-mlx" 2>/dev/null || cd "$HOME"
