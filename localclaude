@@ -22,7 +22,26 @@ STATE_HOME="$HOME/.localclaude"
 LOG_DIR="$STATE_HOME/logs"
 ACTIVE="$STATE_HOME/.active"
 PORT=8000
-SEARXNG_MCP_DIR="${LOCALCLAUDE_SEARXNG_MCP_DIR:-$HOME/Dev/searxng-mcp}"
+
+# Workspace layout: localclaude script lives at $WORKSPACE_DIR/localclaude/localclaude
+# with sister components $WORKSPACE_DIR/vllm-mlx and $WORKSPACE_DIR/searxng-mcp.
+# Resolved from the script's own location so the umbrella folder can move freely.
+# Override paths individually with LOCALCLAUDE_{WORKSPACE,VLLM_MLX,SEARXNG_MCP}_DIR.
+_resolve_workspace_dir() {
+    if [[ -n "${LOCALCLAUDE_WORKSPACE_DIR:-}" ]]; then
+        echo "$LOCALCLAUDE_WORKSPACE_DIR"
+        return
+    fi
+    local src="${BASH_SOURCE[0]}"
+    while [[ -L "$src" ]]; do
+        local link; link="$(readlink "$src")"
+        [[ "$link" = /* ]] && src="$link" || src="$(dirname "$src")/$link"
+    done
+    dirname "$(cd "$(dirname "$src")" && pwd)"
+}
+WORKSPACE_DIR="$(_resolve_workspace_dir)"
+VLLM_MLX_DIR="${LOCALCLAUDE_VLLM_MLX_DIR:-$WORKSPACE_DIR/vllm-mlx}"
+SEARXNG_MCP_DIR="${LOCALCLAUDE_SEARXNG_MCP_DIR:-$WORKSPACE_DIR/searxng-mcp}"
 SEARXNG_PORT=8080
 mkdir -p "$LOG_DIR"
 
@@ -57,13 +76,13 @@ check_claude_cli() {
 }
 
 check_local_vllm_mlx_repo() {
-    if [[ -d "$HOME/Dev/vllm-mlx/vllm_mlx" ]]; then
-        _ok "local vllm-mlx repo at ~/Dev/vllm-mlx (used via PYTHONPATH override)"
+    if [[ -d "$VLLM_MLX_DIR/vllm_mlx" ]]; then
+        _ok "local vllm-mlx repo at $VLLM_MLX_DIR (used via PYTHONPATH override)"
         return 0
     fi
-    _warn "no ~/Dev/vllm-mlx repo — server will use whatever vllm-mlx is on PATH"
+    _warn "no vllm-mlx repo at $VLLM_MLX_DIR — server will use whatever vllm-mlx is on PATH"
     _warn "  (clone the patched fork for thinking-gate + optimizer features:"
-    _warn "   git clone https://github.com/akaszubski/vllm-mlx.git ~/Dev/vllm-mlx)"
+    _warn "   git clone https://github.com/akaszubski/vllm-mlx.git $VLLM_MLX_DIR)"
     return 1
 }
 
@@ -359,11 +378,16 @@ _close_tunnel() {
 # Run a command on the remote host. Sets LOCALCLAUDE_NO_REMOTE=1 so any
 # `localclaude` invocation there knows it's already on the destination
 # machine and won't try to bounce again. Also extends PATH because
-# non-interactive SSH shells don't source ~/.zshrc, so neither
-# ~/Dev/localclaude nor ~/.orbstack/bin would be found.
+# non-interactive SSH shells don't source ~/.zshrc, so the localclaude
+# script and ~/.orbstack/bin would not be found.
+#
+# Assumes the remote machine mirrors this Mac's umbrella layout
+# ($HOME/Dev/local-claude-code-mlx/localclaude). Override per-host via
+# LOCALCLAUDE_REMOTE_PATH_PREFIX if needed.
 _remote_exec() {
     local host="$1"; shift
-    local path_prefix='export PATH="$HOME/Dev/localclaude:$HOME/.orbstack/bin:$PATH";'
+    local default_prefix='export PATH="$HOME/Dev/local-claude-code-mlx/localclaude:$HOME/.orbstack/bin:$PATH";'
+    local path_prefix="${LOCALCLAUDE_REMOTE_PATH_PREFIX:-$default_prefix}"
     ssh -o BatchMode=yes "$host" "$path_prefix LOCALCLAUDE_NO_REMOTE=1 $*"
 }
 
@@ -736,8 +760,8 @@ META
     # patches) over any system-wide install. Picking up the local copy means
     # our --optimize-prompts / --reasoning-parser flags actually exist.
     local pythonpath_prefix=""
-    if [[ -d "$HOME/Dev/vllm-mlx/vllm_mlx" ]]; then
-        pythonpath_prefix="PYTHONPATH=$HOME/Dev/vllm-mlx"
+    if [[ -d "$VLLM_MLX_DIR/vllm_mlx" ]]; then
+        pythonpath_prefix="PYTHONPATH=$VLLM_MLX_DIR"
     fi
 
     # If the model is fully cached, tell huggingface_hub to skip network
@@ -783,7 +807,7 @@ META
 
     # Launch detached. PYTHONPATH and HF_HUB_OFFLINE prefixes (if any) ensure
     # we use the user's local patched repo and skip needless HF validation.
-    cd "$HOME/Dev/vllm-mlx" 2>/dev/null || cd "$HOME"
+    cd "$VLLM_MLX_DIR" 2>/dev/null || cd "$HOME"
     local env_prefix
     env_prefix=$(printf '%s ' $pythonpath_prefix $hf_offline_prefix | sed 's/ *$//')
     if [[ -n "$env_prefix" ]]; then
@@ -910,7 +934,7 @@ do_cc() {
     # Avoid running from $HOME (Glob will time out scanning the whole home dir).
     local cwd="$PWD"
     if [[ "$cwd" == "$HOME" ]]; then
-        cwd="$HOME/Dev/vllm-mlx"
+        cwd="$VLLM_MLX_DIR"
         echo "(switching cwd to $cwd to avoid Glob timeout in \$HOME)" >&2
     fi
     cd "$cwd"
