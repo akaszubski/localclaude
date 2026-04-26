@@ -33,7 +33,7 @@ source ~/.zshrc
 
 ### Prereqs
 
-- [`vllm-mlx`](https://github.com/akaszubski/vllm-mlx) on `PATH` (`pip install vllm-mlx`, or `pip install -e ../vllm-mlx` for the local fork)
+- [`vllm-mlx`](https://github.com/akaszubski/vllm-mlx) on `PATH` — install the **fork** with `pip install -e ../vllm-mlx`. The PyPI build (`pip install vllm-mlx`) does NOT have the prompt optimizer / tool-stub / thinking-gate patches and will give you ~50s prefill instead of ~3-5s.
 - [`claude`](https://docs.claude.com/claude-code) CLI 2.x
 - [OrbStack](https://orbstack.dev) or Docker Desktop — runs the `localclaude-searxng` container that powers `mcp__searxng__*` tools
 - [`searxng-mcp`](../searxng-mcp/) sister directory present (auto-resolved from script location)
