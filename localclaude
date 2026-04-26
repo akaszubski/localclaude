@@ -621,6 +621,34 @@ do_start() {
     local model tool_parser reasoning_parser context_window remote_host
     IFS='|' read -r model tool_parser reasoning_parser context_window remote_host <<<"$resolved"
 
+    # ── Single-Mac safety check for big-model profiles ────────────
+    # If the profile resolves to a model that exceeds this Mac's RAM and
+    # there's no remote host configured, bail clearly rather than silently
+    # OOM'ing during the load.
+    case "$profile" in
+        coder-480)
+            local ram_gb
+            ram_gb=$(($(sysctl -n hw.memsize) / 1024 / 1024 / 1024))
+            if (( ram_gb < 256 )) && [[ -z "$remote_host" ]] && ! _is_model_cached "$model"; then
+                cat >&2 <<EOF
+✗ Profile '$profile' needs ~250 GB of RAM (or a remote that has it).
+   This Mac has ${ram_gb} GB. Two ways to use this profile:
+
+     1. (multi-Mac) export LOCALCLAUDE_CODER_480_REMOTE=user@m3-host
+        in your ~/.zshrc, then re-run \`localclaude start coder-480\`.
+        It will SSH-route the server to that host transparently.
+
+     2. (single-Mac) Use a smaller profile: \`coder\` (30B), \`coder-next\`
+        (32B 8-bit) or \`qwen36\` (35B). See \`localclaude -h\`.
+
+   To opt out of remote routing entirely (force local-only behaviour):
+     export LOCALCLAUDE_NO_REMOTE=1
+EOF
+                return 1
+            fi
+            ;;
+    esac
+
     # ── Remote dispatch ───────────────────────────────────────────
     # If this profile names a remote host AND the model isn't cached on this
     # machine AND we aren't already running on the remote (env var prevents
