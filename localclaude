@@ -312,7 +312,10 @@ profile_resolve() {
         # 'remote_host' here means: if this profile is started on a machine
         # that doesn't have the weights cached, SSH to the listed host and
         # run the server there + tunnel its port locally.
-        coder-480)   echo "mlx-community/Qwen3-Coder-480B-A35B-Instruct-4bit|qwen3_coder||262144|andrewkaszubski@10.55.0.2" ;;
+        # Set LOCALCLAUDE_CODER_480_REMOTE=user@host (e.g. via .zshrc) on
+        # any machine that has access to a 480B-capable host. Empty by
+        # default — local-only setups won't use this profile.
+        coder-480)   echo "mlx-community/Qwen3-Coder-480B-A35B-Instruct-4bit|qwen3_coder||262144|${LOCALCLAUDE_CODER_480_REMOTE:-}" ;;
         # 'opus' (Qwen3.5-27B-Claude-4.6-Opus-Distilled-MLX-4bit) removed:
         # the upload includes vision_tower weights, so vllm-mlx's text engine
         # crashes on the unknown keys. Re-enable if/when a text-only variant

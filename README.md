@@ -179,6 +179,7 @@ if you've moved them:
 | `LOCALCLAUDE_WORKSPACE_DIR` | parent of the script |
 | `LOCALCLAUDE_VLLM_MLX_DIR` | `$WORKSPACE/vllm-mlx` |
 | `LOCALCLAUDE_SEARXNG_MCP_DIR` | `$WORKSPACE/searxng-mcp` |
+| `LOCALCLAUDE_CODER_480_REMOTE` | `""` (empty — `coder-480` won't auto-route. Set to `user@host` on machines that have access to a 480B-capable Mac, e.g. via your shell rc.) |
 
 ## State
 

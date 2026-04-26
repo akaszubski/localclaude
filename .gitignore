@@ -1,3 +1,22 @@
+# OS / editor
 .DS_Store
+Thumbs.db
 *.swp
+*.swo
+.vscode/
+.idea/
+
+# Logs (per-machine state lives in ~/.localclaude/, not in repo)
 *.log
+
+# Secrets -- never commit. Personal SSH endpoints (LOCALCLAUDE_CODER_480_REMOTE)
+# go in ~/.zshrc, not in this repo.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+secrets.json
+credentials.json
+.secrets/
