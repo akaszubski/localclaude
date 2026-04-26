@@ -673,13 +673,46 @@ META
         return 1
     fi
 
-    # Soft checks: warn but don't block. Skipped on -allowlist all where
-    # the user explicitly opted into having to register MCP themselves.
+    # Soft auto-start: SearXNG is optional but the `code` allowlist references
+    # mcp__searxng__*. Try idempotent fixes (orb start, docker compose up -d);
+    # never run destructive operations (e.g. docker rm) — print the recipe
+    # instead. Skipped on -allowlist all where the user manages MCP themselves.
     if [[ "$allowlist_preset" != "all" ]]; then
-        if ! docker ps --filter "name=localclaude-searxng" --format '{{.ID}}' 2>/dev/null | grep -q .; then
-            _warn "SearXNG container not running — \`mcp__searxng__*\` tools won't work"
-            _warn "   start it with: cd $SEARXNG_MCP_DIR && docker compose up -d"
-            _warn "   (or run: localclaude doctor)"
+        if ! command -v docker >/dev/null 2>&1; then
+            :  # docker not installed — user opted out of MCP search; stay silent
+        else
+            if ! docker info >/dev/null 2>&1; then
+                if command -v orb >/dev/null 2>&1; then
+                    echo "  OrbStack engine stopped — starting…"
+                    if orb start >/dev/null 2>&1; then
+                        echo "  ✓ OrbStack engine up"
+                    else
+                        _warn "OrbStack failed to start — run: orb start"
+                    fi
+                else
+                    _warn "Docker daemon not running — start it for mcp__searxng__* tools"
+                fi
+            fi
+
+            if docker info >/dev/null 2>&1; then
+                local _cstate
+                _cstate=$(docker inspect -f '{{.State.Status}}' localclaude-searxng 2>/dev/null || echo "missing")
+                case "$_cstate" in
+                    running) ;;  # all good
+                    missing|exited|created|dead)
+                        echo "  SearXNG container not running ($_cstate) — bringing it up…"
+                        if (cd "$SEARXNG_MCP_DIR" && docker compose up -d >/dev/null 2>&1); then
+                            echo "  ✓ SearXNG up on :$SEARXNG_PORT"
+                        else
+                            _warn "SearXNG failed to start — check: cd $SEARXNG_MCP_DIR && docker compose up"
+                            _warn "   (if exit-127 mount errors: docker rm -f localclaude-searxng && docker compose up -d)"
+                        fi
+                        ;;
+                    *)  # restarting / paused / etc — surface but don't touch
+                        _warn "SearXNG container in unexpected state: $_cstate"
+                        ;;
+                esac
+            fi
             echo
         fi
     fi
@@ -742,6 +775,15 @@ META
             ;;
     esac
 
+    # SSD KV-cache tier (default-on as of 2026-04-26).
+    # Persists prefix cache to disk; cold-restart reuses it instead of
+    # re-prefilling the system prompt + tool definitions. Default 20 GB cap.
+    # Disable by setting LOCALCLAUDE_SSD_CACHE_DIR=off (or empty).
+    local ssd_cache_dir="${LOCALCLAUDE_SSD_CACHE_DIR-$HOME/.localclaude/ssd-cache}"
+    if [[ -n "$ssd_cache_dir" && "$ssd_cache_dir" != "off" ]]; then
+        mkdir -p "$ssd_cache_dir"
+    fi
+
     # Build args
     local args=(
         serve "$model"
@@ -755,6 +797,20 @@ META
     )
     [[ -n "$reasoning_parser" ]] && args+=(--reasoning-parser "$reasoning_parser")
     [[ -n "$allowlist_tools" ]] && args+=(--optimize-tool-allowlist "$allowlist_tools")
+    if [[ -n "$ssd_cache_dir" && "$ssd_cache_dir" != "off" ]]; then
+        args+=(--ssd-cache-dir "$ssd_cache_dir" --ssd-cache-max-gb "${LOCALCLAUDE_SSD_CACHE_MAX_GB:-20}")
+    fi
+
+    # Bench / experimentation hook: anything in $LOCALCLAUDE_EXTRA_VLLM_ARGS is
+    # word-split and appended as additional `vllm-mlx serve` flags. Used by the
+    # umbrella bench harness to A/B test cache features (--warm-prompts,
+    # --ssd-cache-dir, --kv-cache-quantization, ...) without forking the script.
+    if [[ -n "${LOCALCLAUDE_EXTRA_VLLM_ARGS:-}" ]]; then
+        local extra
+        # shellcheck disable=SC2206
+        extra=($LOCALCLAUDE_EXTRA_VLLM_ARGS)
+        args+=("${extra[@]}")
+    fi
 
     # Prefer the user's local vllm-mlx repo (with optimizer + thinking-gate
     # patches) over any system-wide install. Picking up the local copy means
