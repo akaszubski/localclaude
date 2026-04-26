@@ -65,14 +65,14 @@ localclaude -h                 Help.
 
 ### Profiles
 
-| Key | Model | Notes |
-|---|---|---|
-| `coder` | `mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit` | MoE A3B coder, ~120 tok/s on M4 Max |
-| `coder-next` | `lmstudio-community/Qwen3-Coder-Next-MLX-8bit` | 8-bit, top SWE-bench Pass@5 |
-| `coder-480` | `mlx-community/Qwen3-Coder-480B-A35B-Instruct-4bit` | ~250 GB on disk; auto-routes via SSH to a remote host that has the weights when run on a smaller Mac |
-| `instruct` | `mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit` | General MoE baseline |
-| `qwen36` | `mlx-community/Qwen3.6-35B-A3B-4bit` | Newest, beats Gemma 4 (download on demand) |
-| `gemma4` | `mlx-community/gemma-4-31b-it-4bit` | Google dense 31B |
+| Key | Model | Tool parser | Notes |
+|---|---|---|---|
+| `coder` | `mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit` | `qwen3_coder` | MoE A3B coder, ~120 tok/s on M4 Max |
+| `coder-next` | `lmstudio-community/Qwen3-Coder-Next-MLX-8bit` | `qwen3_coder` | 8-bit, top SWE-bench Pass@5 |
+| `coder-480` | `mlx-community/Qwen3-Coder-480B-A35B-Instruct-4bit` | `qwen3_coder` | ~250 GB on disk; auto-routes via SSH to a remote host that has the weights when run on a smaller Mac |
+| `instruct` | `mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit` | `qwen` | General MoE baseline. ⚠ See [vllm-mlx#431](https://github.com/waybarrios/vllm-mlx/issues/431) — `qwen` parser drops whitespace-only deltas mid-stream; markdown layout collapses (cosmetic). |
+| `qwen36` | `mlx-community/Qwen3.6-35B-A3B-4bit` | `qwen` | Newest, beats Gemma 4 (download on demand). Same `qwen`-parser caveat as `instruct`. |
+| `gemma4` | `mlx-community/gemma-4-31b-it-4bit` | `gemma4` | ⚠ **Currently broken** — see [vllm-mlx#380](https://github.com/waybarrios/vllm-mlx/issues/380): nonsense output under continuous batching, stray `&lt;channel&#124;&gt;` tokens. Use `qwen36` instead until upstream fix lands. |
 
 Pass arbitrary models via `localclaude start -model <hf-id>`.
 
