@@ -182,6 +182,20 @@ if you've moved them:
 | `LOCALCLAUDE_CODER_480_REMOTE` | `""` (empty — `coder-480` won't auto-route. Set to `user@host` on machines that have access to a 480B-capable Mac, e.g. via your shell rc.) |
 | `LOCALCLAUDE_NO_REMOTE` | `""` (unset — remote routing enabled). Set to `1` to **force local-only behaviour** even if `LOCALCLAUDE_CODER_480_REMOTE` is set. Useful for single-Mac users who want to be sure nothing tries to SSH out. |
 
+## Model storage
+
+`localclaude` reads cached model weights from **`$HOME/Models`** first, falling back to `$HOME/.cache/huggingface/hub` for legacy installs (see `_is_model_cached()` at line 342).
+
+To make `~/Models` your HuggingFace cache (recommended — keeps weights out of `.cache/` where macOS Storage management may evict them):
+
+```bash
+mkdir -p ~/Models
+echo 'export HF_HUB_CACHE="$HOME/Models"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+For multi-Mac NFS-shared model storage and other advanced setups, see the [umbrella README](https://github.com/akaszubski/local-claude-code-mlx#model-storage).
+
 ## State
 
 | Path | What it is |
