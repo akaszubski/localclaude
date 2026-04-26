@@ -78,15 +78,23 @@ Pass arbitrary models via `localclaude start -model <hf-id>`.
 
 ### Allowlist presets
 
-`-allowlist <preset>` controls how aggressively the optimizer drops tools
-from the Claude Code request to keep prefill fast.
+`-allowlist <preset>` controls the **vllm-mlx prompt optimizer**'s tool
+allowlist. The optimizer (fork patches `818f3fcb` + `ae25fb83` + `b680dc20`,
+flags `--optimize-prompts --optimize-stub-tools --optimize-tool-allowlist`)
+drops tool definitions whose names aren't on the list and replaces verbose
+descriptions with short stubs. This is the single biggest perf win for local
+Claude — without it, prefill of an 80K-token Claude Code request takes ~50s
+on M4 Max instead of ~3-5s.
 
-| Preset | Tools sent | Reduction | Notes |
+| Preset | Tools sent | Token reduction | Notes |
 |---|---|---|---|
 | `minimal` | 6 (Read, Edit, Bash, Grep, Glob, Write) | ~99.5% | File ops + shell only. Fastest prefill. |
-| `code` (default) | 33 Claude Code natives + `mcp__searxng__*` | ~98% | Full agentic toolkit + local web research. WebSearch / WebFetch dropped (no-ops vs local server) so the model uses MCP. |
+| `code` (default) | 33 Claude Code natives + `mcp__searxng__*` | ~98% | Full agentic toolkit + local web research. WebSearch / WebFetch dropped (no-ops vs local server) so the model uses MCP instead. Other MCP servers (Gmail, Calendar, Home Assistant, etc.) excluded so prefill stays fast. |
 | `web` | (alias for `code`) | | Kept for backwards compat. |
-| `all` / `off` / `none` | Full 274+ tool catalog | 0% | Slowest first prefill (~50s for 80k tokens). Every registered MCP tool included. |
+| `all` / `off` / `none` | Full 274+ tool catalog | 0% | Slowest first prefill (~50s for 80k tokens). Every registered MCP tool included. Use when you specifically need a tool the `code` allowlist filters out. |
+
+The optimizer is documented in detail at
+[vllm-mlx/docs/guides/optimizer.md](https://github.com/akaszubski/vllm-mlx/blob/main/docs/guides/optimizer.md).
 
 ### Daily flow
 
