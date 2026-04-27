@@ -644,16 +644,6 @@ localclaude status   # what's running + connect command + recent log lines
 |---|---|
 | [`waybarrios/vllm-mlx`](https://github.com/waybarrios/vllm-mlx) | Upstream of the vllm-mlx fork. File bugs here (the fork has issues disabled). The fork rebases on this regularly to pick up upstream fixes. |
 
-### Companion projects (same Apple-Silicon-LLM ecosystem, optional)
-
-These pair well with this stack but aren't dependencies — clone if you want them:
-
-| Repo | What it is |
-|---|---|
-| [`akaszubski/autonomous-dev`](https://github.com/akaszubski/autonomous-dev) | Claude Code 2.0 workflow framework — agents, hooks, `/implement` pipeline, plan-critic, etc. Useful if you want structured agent workflows on top of local Claude. Recent feedback issues from this stack ([#977](https://github.com/akaszubski/autonomous-dev/issues/977), [#978](https://github.com/akaszubski/autonomous-dev/issues/978), [#979](https://github.com/akaszubski/autonomous-dev/issues/979)) live here. |
-| [`akaszubski/DeepResearch-MLX`](https://github.com/akaszubski/DeepResearch-MLX) | MLX port of Tongyi DeepResearch. Runs on the same vllm-mlx fork; gives you agentic deep-research alongside Claude Code. |
-| [`akaszubski/abliterator_mlx`](https://github.com/akaszubski/abliterator_mlx) | MLX port of abliterator. Niche local-LLM tooling for the same hardware target. |
-
 ## License
 
 All four repos (`localclaude`, `vllm-mlx` fork, `searxng-mcp`, plus the now-archived `local-claude-code-mlx` umbrella) are Apache 2.0.
