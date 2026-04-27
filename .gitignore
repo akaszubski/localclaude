@@ -20,3 +20,4 @@ Thumbs.db
 secrets.json
 credentials.json
 .secrets/
+.claude/
