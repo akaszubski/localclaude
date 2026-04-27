@@ -172,8 +172,7 @@ Why these defaults? See `CHANGELOG.md` for the full reasoning.
 | `~/Models/` | huggingface_hub (set `HF_HUB_CACHE=$HOME/Models`) | **Canonical** model-weights location for this stack. Single source of truth on each Mac; NFS-shareable across machines. |
 | `~/.cache/huggingface/hub/` | huggingface_hub (default if `HF_HUB_CACHE` unset) | Legacy fallback — `localclaude` reads it for backwards compatibility but new downloads should go to `~/Models/`. |
 | `~/.claude.json` | Claude Code | MCP server registrations (used by Claude to know about `mcp__searxng__*`) |
-| `<umbrella>/bench/runs/<ts>/` | bench/run.sh | A/B run artefacts (`raw.jsonl`, `summary.md`, per-condition server logs) |
-| `<umbrella>/searxng-mcp/searxng-config/settings.yml` | searxng-mcp | Bind-mounted into the SearXNG container as `/etc/searxng/settings.yml` |
+| `<parent>/searxng-mcp/searxng-config/settings.yml` | searxng-mcp | Bind-mounted into the SearXNG container as `/etc/searxng/settings.yml`. `<parent>` is the parent dir of `localclaude/` (e.g. `~/Dev/`). |
 
 ## Known constraints and upstream issues
 
@@ -236,11 +235,12 @@ Related upstream PRs not yet merged: [`#345`](https://github.com/waybarrios/vllm
 
 The cost is one extra `pip install -e .` at setup time. The benefit is that you get the patches *and* upstream evolution.
 
-## Why this layout instead of one repo?
+## Why three repos instead of one?
 
-- **vllm-mlx** is a fork (`akaszubski/vllm-mlx`, branched from upstream `waybarrios/vllm-mlx`) — install source is the fork (it carries the optimizer / tool-stub / thinking-gate patches), bug-report destination is upstream. The fork rebases on upstream regularly so we get upstream fixes without vendoring stale code.
-- **localclaude** is independently useful (anyone running vllm-mlx with Claude Code can use it without searxng-mcp or this umbrella) and changes infrequently.
-- **searxng-mcp** is a generic MCP server that other people's Claude Code setups might want — it doesn't depend on vllm-mlx.
-- **This umbrella** holds the cross-component things: the architectural README you're reading, the `bench/` harness that needs all three, and decisions about how they fit together.
+- **`localclaude`** (this repo) is the user-facing entry point — install script, lifecycle wrapper, all the docs, the `localclaude` bash command. Independently useful for anyone running vllm-mlx + Claude Code, even without searxng-mcp.
+- **`vllm-mlx`** is a fork (`akaszubski/vllm-mlx`, branched from upstream `waybarrios/vllm-mlx`). Install source is the fork (it carries the optimizer / tool-stub / thinking-gate patches), bug-report destination is upstream. The fork rebases on upstream regularly so we pick up upstream fixes without vendoring stale code.
+- **`searxng-mcp`** is a generic MCP server that other Claude Code setups might want too — it doesn't depend on vllm-mlx.
 
-The price is three `git clone` commands at setup. The benefit is that each component evolves at its own pace and can be used standalone.
+The price is `install.sh` doing two extra clones (vllm-mlx, searxng-mcp) at setup. The benefit is that each component evolves at its own pace and can be used standalone.
+
+A previous "umbrella" repo (`akaszubski/local-claude-code-mlx`) tried to hold all the docs in a fourth repo. It was archived in favour of this collapse — `localclaude` is now the home for everything user-facing.

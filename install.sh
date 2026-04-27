@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install.sh -- one-shot setup for the local-claude-code-mlx stack.
+# install.sh -- one-shot setup for the localclaude / Apple-Silicon Claude Code stack.
 #
 # Mac-only. Brings up the full stack:
 #   1. Verifies Apple Silicon + macOS
@@ -373,7 +373,7 @@ else
         ok "$rc already references $LOCALCLAUDE_DIR"
     elif ask "Append PATH export for $LOCALCLAUDE_DIR to $rc?"; then
         maybe "echo '' >> '$rc'"
-        maybe "echo '# local-claude-code-mlx' >> '$rc'"
+        maybe "echo '# localclaude (Claude Code on Apple Silicon)' >> '$rc'"
         maybe "echo 'export PATH=\"$LOCALCLAUDE_DIR:\$PATH\"' >> '$rc'"
         ok "added to $rc -- open a new shell or run: source $rc"
     else
@@ -406,9 +406,9 @@ echo "  1. ${BOLD}Open a new terminal${RESET} (or \`source ~/.zshrc\`) so localc
 echo "  2. From any project directory, run: ${BOLD}localclaude start coder${RESET}"
 echo "  3. In a second terminal: ${BOLD}localclaude cc${RESET} (launches claude with the right env)"
 echo
-echo "Read the umbrella README and ARCHITECTURE.md for performance tuning,"
-echo "the operational caveats (security posture, memory leak watchdog), and"
-echo "the bench harness for cache-config A/B testing."
+echo "Read README.md and ARCHITECTURE.md for performance tuning, the"
+echo "operational caveats (security posture, memory leak watchdog), and"
+echo "the multi-Mac NFS-shared model storage option."
 echo
 echo "${BOLD}Recommended (optional):${RESET} append the search-routing snippet to your"
 echo "global ~/.claude/CLAUDE.md so the model goes straight to mcp__searxng__*"

@@ -25,7 +25,7 @@ PORT=8000
 
 # Workspace layout: localclaude script lives at $WORKSPACE_DIR/localclaude/localclaude
 # with sister components $WORKSPACE_DIR/vllm-mlx and $WORKSPACE_DIR/searxng-mcp.
-# Resolved from the script's own location so the umbrella folder can move freely.
+# Resolved from the script's own location so the parent folder can move freely.
 # Override paths individually with LOCALCLAUDE_{WORKSPACE,VLLM_MLX,SEARXNG_MCP}_DIR.
 _resolve_workspace_dir() {
     if [[ -n "${LOCALCLAUDE_WORKSPACE_DIR:-}" ]]; then
@@ -384,12 +384,13 @@ _close_tunnel() {
 # non-interactive SSH shells don't source ~/.zshrc, so the localclaude
 # script and ~/.orbstack/bin would not be found.
 #
-# Assumes the remote machine mirrors this Mac's umbrella layout
-# ($HOME/Dev/local-claude-code-mlx/localclaude). Override per-host via
-# LOCALCLAUDE_REMOTE_PATH_PREFIX if needed.
+# Assumes the remote machine mirrors the canonical layout
+# ($HOME/Dev/localclaude with sister repos at $HOME/Dev/vllm-mlx and
+# $HOME/Dev/searxng-mcp). Override per-host via LOCALCLAUDE_REMOTE_PATH_PREFIX
+# if your remote uses a different location for the localclaude clone.
 _remote_exec() {
     local host="$1"; shift
-    local default_prefix='export PATH="$HOME/Dev/local-claude-code-mlx/localclaude:$HOME/.orbstack/bin:$PATH";'
+    local default_prefix='export PATH="$HOME/Dev/localclaude:$HOME/.orbstack/bin:$PATH";'
     local path_prefix="${LOCALCLAUDE_REMOTE_PATH_PREFIX:-$default_prefix}"
     ssh -o BatchMode=yes "$host" "$path_prefix LOCALCLAUDE_NO_REMOTE=1 $*"
 }
@@ -832,10 +833,10 @@ META
         args+=(--ssd-cache-dir "$ssd_cache_dir" --ssd-cache-max-gb "${LOCALCLAUDE_SSD_CACHE_MAX_GB:-20}")
     fi
 
-    # Bench / experimentation hook: anything in $LOCALCLAUDE_EXTRA_VLLM_ARGS is
-    # word-split and appended as additional `vllm-mlx serve` flags. Used by the
-    # umbrella bench harness to A/B test cache features (--warm-prompts,
-    # --ssd-cache-dir, --kv-cache-quantization, ...) without forking the script.
+    # Experimentation hook: anything in $LOCALCLAUDE_EXTRA_VLLM_ARGS is
+    # word-split and appended as additional `vllm-mlx serve` flags. Used to
+    # opt into cache features (--warm-prompts, --kv-cache-quantization, ...)
+    # without forking the script.
     if [[ -n "${LOCALCLAUDE_EXTRA_VLLM_ARGS:-}" ]]; then
         local extra
         # shellcheck disable=SC2206

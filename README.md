@@ -2,7 +2,7 @@
 
 Run **Claude Code** against a **local Qwen** model on Apple Silicon, with real web research. One-script install. No cloud, no API keys, no rate limits.
 
-This is the **main repo** for the `local-claude-code-mlx` stack. It carries the lifecycle wrapper (`localclaude` script), the install script, the architecture docs, and clones the sister components (vllm-mlx fork, searxng-mcp) alongside it.
+**The main repo for the Apple-Silicon Claude Code stack.** Carries the `localclaude` lifecycle wrapper, the install script, and the architecture docs. The install script clones the sister components (vllm-mlx fork, searxng-mcp) as siblings.
 
 **Read also**: [ARCHITECTURE.md](ARCHITECTURE.md) · [CHANGELOG.md](CHANGELOG.md) · [AGENTS.md](AGENTS.md) (if you're an AI agent installing or modifying this stack).
 
@@ -251,7 +251,7 @@ What's shared vs what's per-machine when you run this stack on more than one Mac
 | `vllm-mlx` Python install | ✅ | | Per-machine pip editable install (deps differ per Python). Run `./install.sh` on each Mac. |
 | `searxng-mcp` container | ✅ | | Each Mac needs its own `localclaude-searxng` container on `:8080`. |
 | `searxng-mcp/.venv` | ✅ | | Per-machine Python venv. |
-| `localclaude` script | | ✅ | Cloneable per-machine, OR symlink from NFS (`ln -s /Users/<m3user>/Dev/local-claude-code-mlx/localclaude/localclaude /usr/local/bin/localclaude`). The script uses `$HOME` consistently — same code works for any user. |
+| `localclaude` script | | ✅ | Cloneable per-machine, OR symlink from NFS (`ln -s /Users/<m3user>/Dev/localclaude/localclaude /usr/local/bin/localclaude`). The script uses `$HOME` consistently — same code works for any user. |
 | `~/.localclaude/.active`, `~/.localclaude/logs/` | ✅ | | Per-machine state — don't share. |
 | `~/.localclaude/ssd-cache/` | ✅ | | Per-machine SSD KV cache. Sharing via NFS would defeat the latency point. |
 | `LOCALCLAUDE_*` env vars (in `~/.zshrc`) | ✅ | | Set per machine. `LOCALCLAUDE_CODER_480_REMOTE` typically only set on the *client* Macs (the M3 itself doesn't need to SSH to itself). |
@@ -261,8 +261,8 @@ Practical install order for a second Mac (assuming first Mac already set up):
 ```bash
 # 1. Mount the existing ~/Models via NFS (see "Multi-Mac setup" above).
 # 2. Clone + install on the new Mac:
-git clone https://github.com/akaszubski/local-claude-code-mlx.git ~/Dev/local-claude-code-mlx
-cd ~/Dev/local-claude-code-mlx
+git clone https://github.com/akaszubski/localclaude.git ~/Dev/localclaude
+cd ~/Dev/localclaude
 ./install.sh
 # 3. Set HF_HUB_CACHE in this Mac's ~/.zshrc:
 echo 'export HF_HUB_CACHE="$HOME/Models"' >> ~/.zshrc
