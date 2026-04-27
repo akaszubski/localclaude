@@ -570,7 +570,7 @@ See [vllm-mlx/docs/guides/optimizer.md](https://github.com/akaszubski/vllm-mlx/b
 
 | Knob | Flag | Default | What it buys you | Why this default |
 |---|---|---|---|---|
-| SSD cache tiering | `--ssd-cache-dir <path>` `--ssd-cache-max-gb <N>` | **on** (since 2026-04-26) | Persists prefix cache to disk; cold restarts reuse it (~3× speedup on repeat-call) | No measured downside; cap'd at 20 GB |
+| SSD cache tiering | `--ssd-cache-dir <path>` `--ssd-cache-max-gb <N>` | **off** (since 2026-04-27) | Persists prefix cache to disk; cold restarts reuse it (~3× speedup on repeat-call) | Briefly default-on (2026-04-26 → 04-27). Disabled after the writer thread was found to crash on bfloat16 KV (every production model) — see [`akaszubski/vllm-mlx#1`](https://github.com/akaszubski/vllm-mlx/issues/1). Fix at [`#2`](https://github.com/akaszubski/vllm-mlx/pull/2); will flip back on once merged. Re-enable now with `LOCALCLAUDE_SSD_CACHE_DIR=$HOME/.localclaude/ssd-cache`. |
 | Warm-prompts seeding | `--warm-prompts <seed.json>` | opt-in | Removes the 30s "first prompt" prefill stall via a pre-warmed cache | Seed file is project-specific; no sensible default |
 | 8-bit KV quantization | `--kv-cache-quantization --kv-cache-quantization-bits 8` | opt-in | Halves KV memory pressure | **Bug**: incompatible with cache persistence ([waybarrios/vllm-mlx#443](https://github.com/waybarrios/vllm-mlx/issues/443)) — defeats SSD cache default if combined |
 | MTP (speculative decoding) | `--enable-mtp` | opt-in, profile-gated | 2-3× decode speed on supported models | Only applies to Qwen3-Next / Qwen3.5/3.6; auto-disabled on other models |
@@ -580,9 +580,10 @@ See [CHANGELOG.md](CHANGELOG.md) for the reasoning behind each default.
 ### Override the default + enable opt-ins
 
 ```bash
-# Disable / relocate the SSD cache:
-LOCALCLAUDE_SSD_CACHE_DIR=off localclaude start coder
-LOCALCLAUDE_SSD_CACHE_MAX_GB=50 localclaude start coder
+# Re-enable the SSD cache (off by default after the bf16 bug — see table above):
+LOCALCLAUDE_SSD_CACHE_DIR=$HOME/.localclaude/ssd-cache localclaude start coder
+LOCALCLAUDE_SSD_CACHE_MAX_GB=50 LOCALCLAUDE_SSD_CACHE_DIR=$HOME/.localclaude/ssd-cache \
+  localclaude start coder
 
 # Enable opt-in knobs via the bench escape hatch:
 LOCALCLAUDE_EXTRA_VLLM_ARGS="--warm-prompts $(pwd)/bench/cases/seed.warm.json --enable-mtp" \

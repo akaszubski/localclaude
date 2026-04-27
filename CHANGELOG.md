@@ -31,7 +31,7 @@ This repo absorbed the previous `akaszubski/local-claude-code-mlx` umbrella (now
 
 - **`localclaude` script** in this repo:
   - Auto-starts the OrbStack engine and `localclaude-searxng` container if either is down (idempotent, never destructive — prints recovery recipe for stale-mount errors).
-  - Default-on `--ssd-cache-dir ~/.localclaude/ssd-cache --ssd-cache-max-gb 20`. Override with `LOCALCLAUDE_SSD_CACHE_DIR=off`.
+  - SSD KV-cache tier was briefly default-on (2026-04-26) but flipped back to default-off the next day after [`akaszubski/vllm-mlx#1`](https://github.com/akaszubski/vllm-mlx/issues/1) was found: the writer thread crashed on bf16 KV (every production model), and the resulting MLX stream-binding fault terminated the whole server. Fix shipped in [`akaszubski/vllm-mlx#2`](https://github.com/akaszubski/vllm-mlx/pull/2); the default will flip back once that's merged into the fork's pinned version. Re-enable now with `LOCALCLAUDE_SSD_CACHE_DIR=$HOME/.localclaude/ssd-cache`.
   - Default-on prompt optimizer + tool stubs (via the vllm-mlx fork patches).
   - `coder-480` profile uses `LOCALCLAUDE_CODER_480_REMOTE` env var (no hardcoded SSH endpoints). Bails with a clear recovery menu on Macs with <256 GB RAM and no remote configured.
   - New `LOCALCLAUDE_NO_REMOTE=1` escape hatch — force-local-only behaviour.
@@ -61,11 +61,15 @@ Documented in detail at [vllm-mlx/docs/guides/optimizer.md](https://github.com/a
 
 ### Decisions (with reasoning)
 
-#### SSD KV cache: **default-on**
+#### SSD KV cache: **default-off** (briefly default-on, 2026-04-26 → 2026-04-27)
 
-Cold-restart wins. After `localclaude stop` (or a reboot), the next `start` previously recomputed the prefix cache for the system prompt + tool definitions — ~20-30 s of dead time before the first useful token. With the SSD tier on, the same pages reload from disk in <1 s.
+Intent was default-on for the cold-restart win: after `localclaude stop` (or a reboot), the next `start` previously recomputed the prefix cache for the system prompt + tool definitions — ~20-30 s of dead time before the first useful token. With the SSD tier on, the same pages reload from disk in <1 s.
 
-Cost: up to 20 GB of disk (capped). Override with `LOCALCLAUDE_SSD_CACHE_DIR=off` if disk-constrained.
+Reality after one day in production: the SSD spill writer crashed on `bfloat16` KV layers (the dtype every production model uses). `safetensors.numpy` cannot serialise bf16, and the resulting `RuntimeError` in the daemon writer thread tripped a secondary MLX `Stream(gpu, N) not in current thread` violation that terminated the whole server via uncaught C++ exception. See [`akaszubski/vllm-mlx#1`](https://github.com/akaszubski/vllm-mlx/issues/1) for the full root cause and traceback.
+
+Fix shipped in [`akaszubski/vllm-mlx#2`](https://github.com/akaszubski/vllm-mlx/pull/2) — switches both serializers to MLX-native `mx.save_safetensors`/`mx.load`, and pre-evaluates layers on the producer thread before queue handoff to fix the stream binding. Validated end-to-end (55/55 tests, lossless bf16 round-trip, live server clean across 10+ requests + 1 real spill).
+
+Default will flip back to on once the fix is merged into the fork's main and the localclaude pinned version moves past it. Until then, opt back in explicitly with `LOCALCLAUDE_SSD_CACHE_DIR=$HOME/.localclaude/ssd-cache`.
 
 #### KV-cache 8-bit quantization: **opt-in only**
 
@@ -89,3 +93,4 @@ Only fires on profiles whose model has MTP heads (Qwen3-Next family, Qwen3.5/3.6
 | akaszubski/autonomous-dev | [#978](https://github.com/akaszubski/autonomous-dev/issues/978) | fixture sanitizer — block CLAUDE.md / personal paths in fixtures |
 | akaszubski/autonomous-dev | [#979](https://github.com/akaszubski/autonomous-dev/issues/979) | audit-context — token-cost breakdown for captured Claude Code requests |
 | waybarrios/vllm-mlx | [#443](https://github.com/waybarrios/vllm-mlx/issues/443) | `--kv-cache-quantization` breaks prefix-cache persistence |
+| akaszubski/vllm-mlx | [#1](https://github.com/akaszubski/vllm-mlx/issues/1) → [#2](https://github.com/akaszubski/vllm-mlx/pull/2) | SSD cache writer crashes on bfloat16 KV (filed + fixed same day) |

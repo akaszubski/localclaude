@@ -807,11 +807,18 @@ META
             ;;
     esac
 
-    # SSD KV-cache tier (default-on as of 2026-04-26).
+    # SSD KV-cache tier — default OFF (since 2026-04-27).
     # Persists prefix cache to disk; cold-restart reuses it instead of
     # re-prefilling the system prompt + tool definitions. Default 20 GB cap.
-    # Disable by setting LOCALCLAUDE_SSD_CACHE_DIR=off (or empty).
-    local ssd_cache_dir="${LOCALCLAUDE_SSD_CACHE_DIR-$HOME/.localclaude/ssd-cache}"
+    #
+    # Off by default because the writer thread crashes on bfloat16 KV
+    # caches (which is what every production model uses). Fix landed in
+    # akaszubski/vllm-mlx#2; once that's merged into the fork's main and
+    # this repo's pinned version moves past it, the default can flip back
+    # on. See akaszubski/vllm-mlx#1 for the bug report.
+    #
+    # Enable explicitly with LOCALCLAUDE_SSD_CACHE_DIR=$HOME/.localclaude/ssd-cache.
+    local ssd_cache_dir="${LOCALCLAUDE_SSD_CACHE_DIR-off}"
     if [[ -n "$ssd_cache_dir" && "$ssd_cache_dir" != "off" ]]; then
         mkdir -p "$ssd_cache_dir"
     fi
