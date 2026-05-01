@@ -836,6 +836,15 @@ META
     )
     [[ -n "$reasoning_parser" ]] && args+=(--reasoning-parser "$reasoning_parser")
     [[ -n "$allowlist_tools" ]] && args+=(--optimize-tool-allowlist "$allowlist_tools")
+    # Qwen3-Coder ships an upstream chat template that occasionally emits
+    # `<function\n` (no `=name`) tool calls, which the parser can't handle.
+    # Override with Jan Kessler's community fix from
+    # https://github.com/QwenLM/Qwen3-Coder/issues/475 — adds two lines that
+    # eliminate the malformed-call mode. Applied at server load time so the
+    # HuggingFace cache stays untouched.
+    if [[ "$tool_parser" == "qwen3_coder" ]]; then
+        args+=(--chat-template "$WORKSPACE_DIR/localclaude/templates/qwen3-coder-fixed.jinja")
+    fi
     if [[ -n "$ssd_cache_dir" && "$ssd_cache_dir" != "off" ]]; then
         args+=(--ssd-cache-dir "$ssd_cache_dir" --ssd-cache-max-gb "${LOCALCLAUDE_SSD_CACHE_MAX_GB:-20}")
     fi
