@@ -4,6 +4,19 @@ All notable changes to **`akaszubski/localclaude`**, the main repo for the Apple
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versioning: dated, since this is an orchestration repo not a library.
 
+## [unreleased] — 2026-05-02
+
+### Added
+
+- **`-remote <user@host>` flag on `start`** — any profile can now SSH-route to another Mac on demand, not just `coder-480`. Forces remote dispatch even when the model is cached locally (useful for sending a big inference job to a beefier Mac without rebooting your client).
+- **`LOCALCLAUDE_REMOTE` env var** — generic per-user default that applies to every profile. Precedence is now: CLI `-remote` > profile-specific slot (e.g. `LOCALCLAUDE_CODER_480_REMOTE`) > `LOCALCLAUDE_REMOTE`.
+
+### Changed
+
+- **`_remote_exec` PATH probe** — instead of assuming `~/Dev/localclaude` exists on the remote, the default prefix probes a list of canonical install paths (`~/Dev/localclaude`, `~/Dev/local-claude-code-mlx/localclaude`, `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`). Falls back to `LOCALCLAUDE_REMOTE_PATH_PREFIX` if your layout is non-standard.
+- **Clear failure when the remote can't find `localclaude`** — emits `✗ [remote <hostname>] localclaude not on PATH. Install at $HOME/Dev/localclaude (git clone), symlink there, or set LOCALCLAUDE_REMOTE_PATH_PREFIX.` instead of zsh's bare `command not found`.
+- **Removed `-host`/`--host` aliases for `-bind`** — was an undocumented alias and conflicted conceptually with the new `-remote` flag. Use `-bind` (canonical name).
+
 ## [unreleased] — 2026-04-27
 
 This repo absorbed the previous `akaszubski/local-claude-code-mlx` umbrella (now archived) and is the single user-facing entry point for the stack.

@@ -384,22 +384,25 @@ _close_tunnel() {
 # non-interactive SSH shells don't source ~/.zshrc, so the localclaude
 # script and ~/.orbstack/bin would not be found.
 #
-# Assumes the remote machine mirrors the canonical layout
-# ($HOME/Dev/localclaude with sister repos at $HOME/Dev/vllm-mlx and
-# $HOME/Dev/searxng-mcp). Override per-host via LOCALCLAUDE_REMOTE_PATH_PREFIX
-# if your remote uses a different location for the localclaude clone.
+# The default path-prefix probes a list of canonical install locations
+# rather than assuming one specific layout. If your remote uses a path
+# the probe doesn't know about, override the whole resolution by setting
+# LOCALCLAUDE_REMOTE_PATH_PREFIX to a snippet that exports PATH itself.
 _remote_exec() {
     local host="$1"; shift
-    local default_prefix='export PATH="$HOME/Dev/localclaude:$HOME/.orbstack/bin:$PATH";'
+    local default_prefix='for d in "$HOME/Dev/localclaude" "$HOME/Dev/local-claude-code-mlx/localclaude" "$HOME/.local/bin" /opt/homebrew/bin /usr/local/bin; do [ -x "$d/localclaude" ] && { export PATH="$d:$PATH"; break; }; done; export PATH="$HOME/.orbstack/bin:$PATH"; '
     local path_prefix="${LOCALCLAUDE_REMOTE_PATH_PREFIX:-$default_prefix}"
-    ssh -o BatchMode=yes "$host" "$path_prefix LOCALCLAUDE_NO_REMOTE=1 $*"
+    # Guard: if localclaude still isn't reachable after the prefix runs,
+    # fail with an actionable message instead of bare "command not found".
+    local guard='if ! command -v localclaude >/dev/null 2>&1; then echo "✗ [remote $(hostname -s)] localclaude not on PATH. Install at \$HOME/Dev/localclaude (git clone), symlink there, or set LOCALCLAUDE_REMOTE_PATH_PREFIX. See localclaude -h." >&2; exit 127; fi; '
+    ssh -o BatchMode=yes "$host" "${path_prefix}${guard}LOCALCLAUDE_NO_REMOTE=1 $*"
 }
 
 # ── Help ──────────────────────────────────────────────────────────
 help() {
     cat <<USAGE
 Usage:
-  localclaude start <profile> [-allowlist code|web|all]
+  localclaude start <profile> [-allowlist code|web|all] [-remote user@host]
                                  Kill any existing server, start chosen profile,
                                  print the claude command to connect in another terminal.
   localclaude stop               Kill the running server.
@@ -411,6 +414,14 @@ Usage:
   localclaude doctor             Diagnose the full local-Claude-Code stack.
   localclaude test               End-to-end smoke: real query + garbage detection.
   localclaude -h                 This help.
+
+Flags for \`start\`:
+  -allowlist <preset>  See "Allowlist presets" below.
+  -bind <host>         Bind vllm-mlx to <host> (default: 127.0.0.1, loopback).
+                       Used internally by remote dispatch; rarely set by hand.
+  -remote <user@host>  SSH-route this profile to <user@host>. Forces remote
+                       dispatch even if the model is cached locally. Useful
+                       for sending big jobs to a beefier Mac on demand.
 
 Profiles:
   coder       Qwen3-Coder-30B-A3B-Instruct-4bit       MoE A3B coder, ~120 tok/s
@@ -441,6 +452,24 @@ Examples:
   localclaude start coder                       # default: full Claude Code natives, fast
   localclaude start coder -allowlist all        # add all MCP tools (Gmail, HF, etc), slow
   localclaude start coder -allowlist minimal    # bare-bones, fastest prefill
+  localclaude start coder-480 -remote user@m3   # any profile → remote (one-shot)
+
+Remote routing:
+  Any profile can run on a different Mac via SSH. Three ways to set the host
+  (precedence: CLI > profile slot > generic env var):
+    1. CLI:           localclaude start <profile> -remote user@host
+    2. Profile slot:  export LOCALCLAUDE_CODER_480_REMOTE=user@host  (coder-480 only)
+    3. Generic:       export LOCALCLAUDE_REMOTE=user@host            (all profiles)
+
+  The remote needs:
+    - localclaude on PATH (default probe checks ~/Dev/localclaude,
+      ~/Dev/local-claude-code-mlx/localclaude, ~/.local/bin, /opt/homebrew/bin,
+      /usr/local/bin; override with LOCALCLAUDE_REMOTE_PATH_PREFIX).
+    - vllm-mlx installed (the remote runs the model — not this Mac).
+    - The model weights cached, OR enough disk for an automatic HF download.
+    - SSH key auth from this Mac (BatchMode is non-interactive).
+
+  Opt out of remote routing entirely: export LOCALCLAUDE_NO_REMOTE=1
 
 Only ONE server runs at a time. \`start\` always stops any existing
 vllm-mlx on port $PORT first, so you'll never accidentally have two running.
@@ -565,6 +594,8 @@ do_start() {
     local profile=""
     local allowlist_preset="code"   # default: tight allowlist for fast prefill
     local bind_host="127.0.0.1"     # default: loopback (LAN-safe)
+    local remote_override=""        # set by --remote, overrides profile slot
+    local remote_explicit=0         # 1 when --remote was passed (forces dispatch)
 
     # Parse args: profile name + optional flags. Order doesn't matter.
     while [[ $# -gt 0 ]]; do
@@ -577,13 +608,18 @@ do_start() {
                 allowlist_preset="all"
                 shift
                 ;;
-            -bind|--bind|-host|--host)
+            -bind|--bind)
                 bind_host="${2:-}"
+                shift 2
+                ;;
+            -remote|--remote)
+                remote_override="${2:-}"
+                remote_explicit=1
                 shift 2
                 ;;
             -*)
                 echo "Unknown flag: $1" >&2
-                echo "Available flags: -allowlist <code|all>  -bind <host>" >&2
+                echo "Available flags: -allowlist <code|all>  -bind <host>  -remote <user@host>" >&2
                 return 1
                 ;;
             *)
@@ -622,6 +658,17 @@ do_start() {
     local model tool_parser reasoning_parser context_window remote_host
     IFS='|' read -r model tool_parser reasoning_parser context_window remote_host <<<"$resolved"
 
+    # ── Resolve remote host (precedence: CLI flag > profile slot > generic env) ──
+    # --remote on the command line wins. Otherwise honour the profile's own
+    # remote slot (e.g. LOCALCLAUDE_CODER_480_REMOTE for coder-480). Finally,
+    # fall back to LOCALCLAUDE_REMOTE so any profile can be routed without
+    # editing the script.
+    if [[ -n "$remote_override" ]]; then
+        remote_host="$remote_override"
+    elif [[ -z "$remote_host" ]]; then
+        remote_host="${LOCALCLAUDE_REMOTE:-}"
+    fi
+
     # ── Single-Mac safety check for big-model profiles ────────────
     # If the profile resolves to a model that exceeds this Mac's RAM and
     # there's no remote host configured, bail clearly rather than silently
@@ -633,13 +680,16 @@ do_start() {
             if (( ram_gb < 256 )) && [[ -z "$remote_host" ]] && ! _is_model_cached "$model"; then
                 cat >&2 <<EOF
 ✗ Profile '$profile' needs ~250 GB of RAM (or a remote that has it).
-   This Mac has ${ram_gb} GB. Two ways to use this profile:
+   This Mac has ${ram_gb} GB. Three ways to use this profile:
 
-     1. (multi-Mac) export LOCALCLAUDE_CODER_480_REMOTE=user@m3-host
-        in your ~/.zshrc, then re-run \`localclaude start coder-480\`.
-        It will SSH-route the server to that host transparently.
+     1. (one-shot) localclaude start coder-480 -remote user@m3-host
+        Pass --remote on the CLI; routes this run to that Mac.
 
-     2. (single-Mac) Use a smaller profile: \`coder\` (30B), \`coder-next\`
+     2. (persistent) export LOCALCLAUDE_CODER_480_REMOTE=user@m3-host
+        in your ~/.zshrc — every coder-480 start uses that host.
+        Or set LOCALCLAUDE_REMOTE=user@host as a default for ALL profiles.
+
+     3. (single-Mac) Use a smaller profile: \`coder\` (30B), \`coder-next\`
         (32B 8-bit) or \`qwen36\` (35B). See \`localclaude -h\`.
 
    To opt out of remote routing entirely (force local-only behaviour):
@@ -651,12 +701,18 @@ EOF
     esac
 
     # ── Remote dispatch ───────────────────────────────────────────
-    # If this profile names a remote host AND the model isn't cached on this
-    # machine AND we aren't already running on the remote (env var prevents
-    # recursion), bounce to the remote and connect directly over the network.
-    # We bind the remote server on its own IP (extracted from the SSH host),
-    # so callers on the same mesh can hit it directly without a tunnel.
-    if [[ -n "$remote_host" ]] && [[ -z "${LOCALCLAUDE_NO_REMOTE:-}" ]] && ! _is_model_cached "$model"; then
+    # If a remote host is set AND we aren't already running on the remote
+    # (LOCALCLAUDE_NO_REMOTE prevents recursion), bounce to the remote and
+    # connect directly over the network. We bind the remote server on its
+    # own IP (extracted from the SSH host), so callers on the same mesh can
+    # hit it directly without a tunnel.
+    #
+    # Cache check: when the remote came from a profile slot or env var, we
+    # only dispatch if the model ISN'T cached locally — that way, a fresh
+    # local download "promotes" the profile back to local. With explicit
+    # --remote on the CLI, the user is asking for remote routing regardless.
+    if [[ -n "$remote_host" ]] && [[ -z "${LOCALCLAUDE_NO_REMOTE:-}" ]] && \
+       { [[ "$remote_explicit" == "1" ]] || ! _is_model_cached "$model"; }; then
         # Extract the bare host from user@host
         local remote_ip="${remote_host##*@}"
         echo "Profile $profile resolves to remote: $remote_host"
