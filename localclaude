@@ -321,7 +321,7 @@ profile_resolve() {
         # crashes on the unknown keys. Re-enable if/when a text-only variant
         # ships, or once we route this through --mllm.
         instruct)    echo "mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit|qwen|qwen3|262144|" ;;
-        qwen36)      echo "mlx-community/Qwen3.6-35B-A3B-4bit|qwen|qwen3|262144|" ;;
+        qwen36)      echo "mlx-community/Qwen3.6-35B-A3B-8bit|qwen|qwen3|262144|" ;;
         gemma4)      echo "mlx-community/gemma-4-31b-it-4bit|gemma4||131072|" ;;
         *) return 1 ;;
     esac
@@ -429,7 +429,7 @@ Profiles:
   coder-480   Qwen3-Coder-480B-A35B-Instruct-4bit      ~250GB; top SWE-bench Pro
                                                         (M3 Ultra-class RAM only)
   instruct    Qwen3-30B-A3B-Instruct-2507-4bit         general MoE baseline
-  qwen36      Qwen3.6-35B-A3B-4bit                     newest, beats Gemma 4 (download)
+  qwen36      Qwen3.6-35B-A3B-8bit                     newest 35B-A3B MoE, agentic-coding tuned
   gemma4      gemma-4-31b-it-4bit                      Google dense 31B (cached)
 
 Allowlist presets (controls how aggressively the optimizer drops tools):

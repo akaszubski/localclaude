@@ -168,7 +168,7 @@ huggingface-cli download mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit
 
 # Or temporarily route to an external SSD:
 HF_HUB_CACHE=/Volumes/MyExternalSSD/Models \
-  huggingface-cli download mlx-community/Qwen3.6-35B-A3B-4bit
+  huggingface-cli download mlx-community/Qwen3.6-35B-A3B-8bit
 ```
 
 ### What's already cached?
@@ -278,7 +278,7 @@ echo 'export LOCALCLAUDE_CODER_480_REMOTE=user@m3-ip-or-host' >> ~/.zshrc
 | `coder-next` | `lmstudio-community/Qwen3-Coder-Next-MLX-8bit` | ~32 GB | ~32 GB | Top SWE-bench Pass@5; needs ≥64 GB RAM. |
 | `coder-480` | `mlx-community/Qwen3-Coder-480B-A35B-Instruct-4bit` | ~250 GB | ~250 GB | Auto-routes via SSH if local Mac doesn't have weights cached (set `LOCALCLAUDE_CODER_480_REMOTE=user@host`). |
 | `instruct` | `mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit` | ~17 GB | ~17 GB | General-purpose MoE baseline. |
-| `qwen36` | `mlx-community/Qwen3.6-35B-A3B-4bit` | ~20 GB | ~20 GB | Newest; beats Gemma 4 on most evals. |
+| `qwen36` | `mlx-community/Qwen3.6-35B-A3B-8bit` | ~35 GB | ~35 GB | Newest 35B-A3B MoE; agentic-coding tuned. |
 | `gemma4` | `mlx-community/gemma-4-31b-it-4bit` | ~18 GB | ~18 GB | ⚠ Currently broken under continuous batching ([vllm-mlx#380](https://github.com/waybarrios/vllm-mlx/issues/380)). |
 
 Sizes are approximate (based on the safetensors shards on HuggingFace). Loaded-RAM is roughly the file size for 4-bit quants, slightly more for 8-bit.
@@ -297,7 +297,7 @@ brew install huggingface-cli      # preferred on macOS (avoids PEP 668)
 huggingface-cli download mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit
 
 # Or use a custom cache:
-HF_HOME=/Volumes/MyExternalSSD/hf huggingface-cli download mlx-community/Qwen3.6-35B-A3B-4bit
+HF_HOME=/Volumes/MyExternalSSD/hf huggingface-cli download mlx-community/Qwen3.6-35B-A3B-8bit
 ```
 
 ### What's already cached?
@@ -340,7 +340,7 @@ localclaude -h                 Help.
 | `coder-next` | `lmstudio-community/Qwen3-Coder-Next-MLX-8bit` | `qwen3_coder` | 8-bit, top SWE-bench Pass@5 |
 | `coder-480` | `mlx-community/Qwen3-Coder-480B-A35B-Instruct-4bit` | `qwen3_coder` | ~250 GB on disk; auto-routes via SSH if `LOCALCLAUDE_CODER_480_REMOTE` is set; bails clearly otherwise |
 | `instruct` | `mlx-community/Qwen3-30B-A3B-Instruct-2507-4bit` | `qwen` | General MoE baseline. ⚠ See [vllm-mlx#431](https://github.com/waybarrios/vllm-mlx/issues/431) -- `qwen` parser drops whitespace-only deltas mid-stream; markdown layout collapses (cosmetic). |
-| `qwen36` | `mlx-community/Qwen3.6-35B-A3B-4bit` | `qwen` | Newest, beats Gemma 4 (download on demand). Same `qwen`-parser caveat as `instruct`. |
+| `qwen36` | `mlx-community/Qwen3.6-35B-A3B-8bit` | `qwen` | Newest 35B-A3B MoE, agentic-coding tuned (download on demand). Same `qwen`-parser caveat as `instruct`. |
 | `gemma4` | `mlx-community/gemma-4-31b-it-4bit` | `gemma4` | ⚠ **Currently broken** -- see [vllm-mlx#380](https://github.com/waybarrios/vllm-mlx/issues/380): nonsense output under continuous batching. Use `qwen36` instead until upstream fix lands. |
 
 Pass arbitrary models via `localclaude start -model <hf-id>`.
